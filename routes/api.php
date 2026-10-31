@@ -22,3 +22,7 @@ Route::get('/events', [EventController::class, 'index']);
 
 // Rute untuk melihat riwayat laporan sendiri (wajib login / dijaga satpam Sanctum)
 Route::middleware('auth:sanctum')->get('/my-reports', [ReportController::class, 'history']);
+
+// Rute untuk relawan melakukan penutupan (DIJAGA KETAT)
+Route::middleware(['auth:sanctum', 'role:admin,relawan'])
+     ->post('/events/{id}/resolve', [EventController::class, 'resolve']);

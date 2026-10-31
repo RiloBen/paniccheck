@@ -313,40 +313,44 @@ function paniccheckApp() {
 
             this.isSubmitting = true;
 
-            const payload = {
-                latitude: this.form.latitude,
-                longitude: this.form.longitude,
-                category: this.form.category,
-                water_level: this.form.water_level,
-                description: this.form.description
-            };
+            // UBAH: Gunakan FormData agar bisa membawa file foto fisik
+            const formData = new FormData();
+            formData.append('latitude', this.form.latitude);
+            formData.append('longitude', this.form.longitude);
+            formData.append('category', this.form.category);
+            formData.append('water_level', this.form.water_level);
+            formData.append('description', this.form.description);
+            
+            // Masukkan foto ke dalam paket kiriman jika warga melampirkannya
+            if (this.photoFile) {
+                formData.append('photo', this.photoFile);
+            }
 
             try {
                 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
                 const res = await fetch('/api/reports', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
                         'Accept': 'application/json',
                         'X-CSRF-TOKEN': csrfToken || ''
+                        // PENTING: 'Content-Type' tidak boleh ditulis di sini. 
+                        // Browser akan otomatis mengatur boundary multipart/form-data.
                     },
-                    body: JSON.stringify(payload)
+                    body: formData // Kirim formData, bukan JSON.stringify
                 });
 
                 if (res.ok) {
                     const data = await res.json();
                     this.showToast('Laporan berhasil dikirim & teragregasi!', 'success');
-                    this.onReportSuccess(payload, data.event_id);
+                    // Mengirim seluruh form data (termasuk foto bayangan) ke peta agar instan
+                    this.onReportSuccess(Object.fromEntries(formData), data.event_id); 
                 } else {
-                    // Fallback jika backend tabel DB belum dimigrate
-                    console.warn('Backend DB belum siap, menjalankan fallback simulasi lokal...');
-                    this.showToast('Laporan berhasil dicatat (Mode Simulasi)!', 'success');
-                    this.onReportSuccess(payload, Date.now());
+                    console.warn('Backend menolak data. Pastikan validasi API cocok.');
+                    this.showToast('Gagal mengirim laporan. Cek koneksi.', 'error');
                 }
             } catch (err) {
-                console.warn('Network error / fallback:', err);
-                this.showToast('Laporan berhasil dicatat (Mode Simulasi)!', 'success');
-                this.onReportSuccess(payload, Date.now());
+                console.warn('Network error:', err);
+                this.showToast('Gagal terhubung ke server.', 'error');
             } finally {
                 this.isSubmitting = false;
             }
