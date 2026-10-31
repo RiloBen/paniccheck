@@ -364,12 +364,15 @@ function paniccheckApp() {
             this.form.description = '';
 
             // Tambahkan / perbarui event di peta secara instan
+            const lat = parseFloat(payload.latitude);
+            const lng = parseFloat(payload.longitude);
+
             const newEvent = {
                 id: eventId,
                 category: payload.category,
                 status: 'ACTIVE',
-                latitude: payload.latitude,
-                longitude: payload.longitude,
+                latitude: lat,
+                longitude: lng,
                 water_level: payload.water_level,
                 reports_count: 1,
                 is_verified: false,
@@ -379,7 +382,7 @@ function paniccheckApp() {
 
             this.events.unshift(newEvent);
             this.renderMarkers();
-            this.map.flyTo([payload.latitude, payload.longitude], 15);
+            this.map.flyTo([lat, lng], 15);
             this.selectedEvent = newEvent;
         }
     };
