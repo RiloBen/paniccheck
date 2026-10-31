@@ -73,6 +73,12 @@ class EventApiTest extends TestCase
         $this->assertContains($activeEvent->id, $ids);
         $this->assertContains($staleEvent->id, $ids);
         $this->assertNotContains($resolvedEvent->id, $ids); // RESOLVED tidak boleh ikut terpilih
+
+        // Verifikasi ketika include_resolved=1, event RESOLVED ikut dikembalikan
+        $responseResolved = $this->getJson('/api/events?include_resolved=1');
+        $responseResolved->assertStatus(200);
+        $resolvedIds = collect($responseResolved->json('data'))->pluck('id')->all();
+        $this->assertContains($resolvedEvent->id, $resolvedIds);
     }
 
     /**
@@ -239,6 +245,54 @@ class EventApiTest extends TestCase
 
         $response->assertStatus(404)
             ->assertJson(['message' => 'Event tidak ditemukan']);
+    }
+
+    /**
+     * Uji auto-transisi dinamis (PRD 8.3 M7):
+     * Event ACTIVE yang tidak menerima update selama > 2 jam otomatis beralih ke status STALE saat API diakses.
+     */
+    public function test_get_events_auto_transitions_active_event_older_than_two_hours_to_stale(): void
+    {
+        $oldEvent = Event::create([
+            'category' => 'Banjir',
+            'latitude' => -7.2892,
+            'longitude' => 112.7153,
+            'status' => 'ACTIVE',
+        ]);
+        $oldEvent->timestamps = false;
+        $oldEvent->updated_at = Carbon::now()->subHours(2)->subMinutes(15);
+        $oldEvent->save();
+
+        // 1. Panggil GET /api/events, event otomatis ditransisikan ke STALE
+        $response = $this->getJson('/api/events');
+        $response->assertStatus(200);
+
+        $eventData = collect($response->json('data'))->firstWhere('id', $oldEvent->id);
+        $this->assertNotNull($eventData);
+        $this->assertEquals('STALE', $eventData['status']);
+        $this->assertEquals('STALE', $oldEvent->fresh()->status);
+
+        // 2. Warga melakukan konfirmasi pada event STALE tersebut
+        $user = User::create([
+            'name' => 'Warga Pelapor',
+            'email' => 'warga_confirm@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'user',
+        ]);
+
+        $confirmRes = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/events/{$oldEvent->id}/confirm", [
+                'description' => 'Air masih menggenang tinggi',
+            ]);
+        $confirmRes->assertStatus(200);
+
+        // 3. Setelah konfirmasi, status kembali ACTIVE dan tidak menjadi STALE lagi saat reload
+        $responseAfterConfirm = $this->getJson('/api/events');
+        $responseAfterConfirm->assertStatus(200);
+
+        $eventDataAfter = collect($responseAfterConfirm->json('data'))->firstWhere('id', $oldEvent->id);
+        $this->assertEquals('ACTIVE', $eventDataAfter['status']);
+        $this->assertEquals('ACTIVE', $oldEvent->fresh()->status);
     }
 }
 

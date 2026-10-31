@@ -25,5 +25,16 @@ class AdminSeeder extends Seeder
         } else {
             $this->command->info('Akun Admin sudah ada di database.');
         }
+
+        $relawanEmail = 'relawan@paniccheck.com';
+        if (!User::where('email', $relawanEmail)->exists()) {
+            User::create([
+                'name' => 'Relawan Lapangan',
+                'email' => $relawanEmail,
+                'password' => Hash::make('rahasia123'),
+                'role' => 'relawan',
+            ]);
+            $this->command->info('Akun Relawan berhasil dibuat!');
+        }
     }
 }
