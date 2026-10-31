@@ -19,9 +19,6 @@ Route::post('/reports', [ReportController::class, 'store']);
 
 // Rute untuk peta Rilo mengambil seluruh data kordinat banjir
 Route::get('/events', [EventController::class, 'index']);
-<<<<<<< HEAD
 
 // Rute untuk melihat riwayat laporan sendiri (wajib login / dijaga satpam Sanctum)
 Route::middleware('auth:sanctum')->get('/my-reports', [ReportController::class, 'history']);
-=======
->>>>>>> 78617a9a7024235a4666e6cb7f34dab7e05bc412
