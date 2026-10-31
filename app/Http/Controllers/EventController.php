@@ -64,4 +64,21 @@ class EventController extends Controller
 
         return response()->json(['message' => 'Event berhasil ditutup dan ditandai RESOLVED.']);
     }
+
+    // Fitur 3: Mengirim data kejadian banjir ke peta Rilo
+    public function index()
+    {
+        // Hanya ambil event yang statusnya ACTIVE atau STALE
+        $events = Event::whereIn('status', ['ACTIVE', 'STALE'])
+            // Opsional: Bawa serta data laporan (waktu dan tinggi air) agar Rilo bisa memunculkannya saat pin diklik
+            ->with(['reports' => function($query) {
+                $query->select('id', 'event_id', 'water_level', 'description', 'created_at');
+            }])
+            ->get();
+
+        return response()->json([
+            'message' => 'Berhasil mengambil titik lokasi banjir',
+            'data' => $events
+        ]);
+    }
 }
