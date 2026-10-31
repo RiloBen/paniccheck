@@ -69,6 +69,7 @@ function paniccheckApp() {
         quickCheckResult: null,
         photoPreview: null,
         photoFile: null,
+        reportError: null,
         userCoords: { latitude: -7.2819, longitude: 112.7483 }, // Default Surabaya
         isDetectingUserCoords: false,
 
@@ -123,6 +124,13 @@ function paniccheckApp() {
                       Math.sin(dLon / 2) * Math.sin(dLon / 2);
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
             return Math.round(R * c);
+        },
+
+        getSeverityScore(level) {
+            if (level === 'sepinggang_keatas') return 3;
+            if (level === 'selutut') return 2;
+            if (level === 'semata_kaki') return 1;
+            return 0;
         },
 
         hasConfirmed(eventId) {
@@ -373,16 +381,16 @@ function paniccheckApp() {
                         this.renderMarkers();
                     }
                 } else {
-                    this.showToast(data.message || 'Gagal mengirim konfirmasi.', 'error');
+                    if (res.status === 422) {
+                        this.markConfirmed(eventId);
+                        this.showToast(data.message || 'Anda sudah memberikan laporan awal atau konfirmasi untuk kejadian ini.', 'warning');
+                    } else {
+                        this.showToast(data.message || 'Gagal mengirim konfirmasi.', 'error');
+                    }
                 }
             } catch (err) {
-                this.markConfirmed(eventId);
-                this.showToast('✓ Konfirmasi berhasil dicatat!', 'success');
-                if (this.selectedEvent) {
-                    this.selectedEvent.reports_count = (this.selectedEvent.reports_count || 1) + 1;
-                    this.selectedEvent.status = 'ACTIVE';
-                    this.renderMarkers();
-                }
+                console.warn('Network error during confirmation:', err);
+                this.showToast('Gagal terhubung ke server untuk mengirim konfirmasi.', 'error');
             } finally {
                 this.isConfirming = false;
             }
@@ -563,6 +571,7 @@ function paniccheckApp() {
 
         openReportModal() {
             this.selectedEvent = null;
+            this.reportError = null;
             this.showReportModal = true;
             if (!this.locationAccuracy) {
                 this.detectGPS();
@@ -571,6 +580,7 @@ function paniccheckApp() {
 
         openReportWithCoordinates(lat, lng) {
             this.selectedEvent = null;
+            this.reportError = null;
             this.form.latitude = lat;
             this.form.longitude = lng;
             this.locationAccuracy = 10;
@@ -606,14 +616,16 @@ function paniccheckApp() {
 
         handlePhotoChange(e) {
             const file = e.target.files[0];
-            if (file) {
-                this.photoFile = file;
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    this.photoPreview = event.target.result;
-                };
-                reader.readAsDataURL(file);
+            if (!file) return;
+            // shortcut: hard reject >2MB client-side to match server cap; compress when upgrade needed
+            if (file.size > 2 * 1024 * 1024) {
+                this.showToast('Foto terlalu besar (maks 2MB). Gunakan foto beresolusi lebih rendah.', 'error');
+                e.target.value = '';
+                return;
             }
+            this.photoFile = file;
+            if (this.photoPreview) URL.revokeObjectURL(this.photoPreview);
+            this.photoPreview = URL.createObjectURL(file);
         },
 
         async submitReport() {
@@ -623,16 +635,14 @@ function paniccheckApp() {
             }
 
             this.isSubmitting = true;
+            this.reportError = null;
 
-            // UBAH: Gunakan FormData agar bisa membawa file foto fisik
             const formData = new FormData();
             formData.append('latitude', this.form.latitude);
             formData.append('longitude', this.form.longitude);
             formData.append('category', this.form.category);
             formData.append('water_level', this.form.water_level);
             formData.append('description', this.form.description);
-            
-            // Masukkan foto ke dalam paket kiriman jika warga melampirkannya
             if (this.photoFile) {
                 formData.append('photo', this.photoFile);
             }
@@ -644,35 +654,44 @@ function paniccheckApp() {
                     headers: {
                         'Accept': 'application/json',
                         'X-CSRF-TOKEN': csrfToken || ''
-                        // PENTING: 'Content-Type' tidak boleh ditulis di sini. 
-                        // Browser akan otomatis mengatur boundary multipart/form-data.
+                        // Content-Type omitted: browser sets multipart boundary automatically
                     },
-                    body: formData // Kirim formData, bukan JSON.stringify
+                    body: formData
                 });
 
-                const data = await res.json().catch(() => ({}));
+                // Parse response — guard against PHP warnings polluting JSON (item 2)
+                const text = await res.text();
+                let data = {};
+                try { data = JSON.parse(text); } catch (_) {}
 
                 if (res.ok) {
-                    this.onReportSuccess(Object.fromEntries(formData), data.event_id); 
+                    this.onReportSuccess(Object.fromEntries(formData), data.event_id, data.water_level);
                 } else {
-                    const errorMsg = data.message || (data.errors ? Object.values(data.errors).flat().join(', ') : 'Gagal mengirim laporan. Periksa kelengkapan form.');
-                    this.showToast(errorMsg, 'error');
+                    const msg = data.message || (data.errors ? Object.values(data.errors).flat().join(', ') : 'Gagal mengirim laporan. Periksa kelengkapan form.');
+                    this.reportError = msg; // item 3: shown inside modal, not below it
+                    this.showToast(msg, 'warning');
                 }
             } catch (err) {
                 console.warn('Network error:', err);
-                this.showToast('Gagal terhubung ke server. Menggunakan mode darurat lokal.', 'warning');
+                this.reportError = 'Gagal terhubung ke server. Menggunakan mode darurat lokal.';
+                this.showToast(this.reportError, 'warning');
                 this.onReportSuccess(Object.fromEntries(formData), Date.now());
             } finally {
                 this.isSubmitting = false;
             }
         },
 
-        onReportSuccess(payload, eventId) {
+        onReportSuccess(payload, eventId, resolvedWaterLevel) {
             // Tutup modal dan bersihkan form
             this.showReportModal = false;
+            if (this.photoPreview) URL.revokeObjectURL(this.photoPreview);
             this.photoPreview = null;
             this.photoFile = null;
+            this.reportError = null;
             this.form.description = '';
+
+            // Kunci tombol konfirmasi agar pembuat laporan awal tidak self-confirm
+            this.markConfirmed(eventId);
 
             const lat = parseFloat(payload.latitude);
             const lng = parseFloat(payload.longitude);
@@ -681,7 +700,18 @@ function paniccheckApp() {
             const existing = this.events.find(e => e.id === eventId);
             if (existing) {
                 existing.reports_count = (existing.reports_count || 1) + 1;
-                existing.water_level = payload.water_level || existing.water_level;
+
+                // Terapkan Safety-First Worst-Case Bias (tidak menurunkan level bahaya secara gegabah)
+                if (resolvedWaterLevel) {
+                    existing.water_level = resolvedWaterLevel;
+                } else {
+                    const currentScore = this.getSeverityScore(existing.water_level);
+                    const newScore = this.getSeverityScore(payload.water_level);
+                    if (newScore > currentScore) {
+                        existing.water_level = payload.water_level;
+                    }
+                }
+
                 existing.status = 'ACTIVE';
                 existing.updated_at_human = 'Baru saja';
                 if (!existing.reports) existing.reports = [];
@@ -704,7 +734,7 @@ function paniccheckApp() {
                     status: 'ACTIVE',
                     latitude: lat,
                     longitude: lng,
-                    water_level: payload.water_level || 'selutut',
+                    water_level: resolvedWaterLevel || payload.water_level || 'selutut',
                     reports_count: 1,
                     is_verified: false,
                     location_name: this.guessLocationName(lat, lng, []),

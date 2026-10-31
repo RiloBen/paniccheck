@@ -103,13 +103,13 @@
                     <label class="flex-1 cursor-pointer bg-slate-800/80 hover:bg-slate-700/80 border border-dashed border-slate-600 hover:border-slate-500 py-3 px-3 rounded-xl flex items-center justify-center space-x-2 text-slate-300 transition">
                         <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                         <span class="text-xs" x-text="photoPreview ? 'Ganti Foto' : 'Ambil Foto / Pilih File'"></span>
-                        <input type="file" accept="image/*" capture="environment" @change="handlePhotoChange($event)" class="sr-only">
+                        <input type="file" accept="image/*" capture="environment" @change="handlePhotoChange($event)" x-ref="photoInput" class="sr-only">
                     </label>
 
                     <template x-if="photoPreview">
                         <div class="relative w-12 h-12 rounded-xl overflow-hidden border border-slate-700 flex-shrink-0">
                             <img :src="photoPreview" class="w-full h-full object-cover">
-                            <button type="button" @click="photoPreview = null" class="absolute top-0.5 right-0.5 bg-red-600 text-white rounded-full p-0.5 text-[8px] leading-none">✕</button>
+                            <button type="button" @click="photoPreview = null; photoFile = null; $refs.photoInput.value = ''" class="absolute top-0.5 right-0.5 bg-red-600 text-white rounded-full p-0.5 text-[8px] leading-none">✕</button>
                         </div>
                     </template>
                 </div>
@@ -122,6 +122,12 @@
                           rows="2" 
                           placeholder="Cth: Depan SPBU, arus cukup deras, mobil kecil tidak bisa lewat..."
                           class="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition text-xs"></textarea>
+            </div>
+
+            <!-- Error Banner (Item 3: visible above submit, inside modal z-context) -->
+            <div x-show="reportError" x-cloak class="bg-red-900/80 border border-red-500/60 text-red-200 text-xs rounded-xl px-3 py-2.5 flex items-start space-x-2">
+                <span class="text-red-400 mt-0.5">⚠</span>
+                <span x-text="reportError"></span>
             </div>
 
             <!-- Submit Button -->
