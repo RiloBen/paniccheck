@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\EventController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\QuickCheckController;
 
 // Rute publik untuk pendaftaran dan login
 Route::post('/register', [AuthController::class, 'register']);
@@ -14,6 +15,9 @@ Route::post('/reports', [ReportController::class, 'store']);
 
 // Rute untuk peta Rilo mengambil seluruh data kordinat banjir (M4)
 Route::get('/events', [EventController::class, 'index']);
+
+// Rute Quick Check Scanner (M10) - Bisa diakses publik tanpa login
+Route::post('/quick-check', [QuickCheckController::class, 'scan']);
 
 // Rute yang membutuhkan otentikasi Sanctum
 Route::middleware('auth:sanctum')->group(function () {

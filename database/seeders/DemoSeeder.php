@@ -27,6 +27,7 @@ class DemoSeeder extends Seeder
         // Skenario 1: Banjir AKTIF
         $eventAktif = Event::create([
             'category' => 'banjir',
+            'location_name' => 'Jl. Mayjen Sungkono', // Tambahkan baris ini
             'latitude' => -7.289200,
             'longitude' => 112.715300,
             'status' => 'ACTIVE',
