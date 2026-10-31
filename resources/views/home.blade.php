@@ -126,6 +126,13 @@ function paniccheckApp() {
             return Math.round(R * c);
         },
 
+        getSeverityScore(level) {
+            if (level === 'sepinggang_keatas') return 3;
+            if (level === 'selutut') return 2;
+            if (level === 'semata_kaki') return 1;
+            return 0;
+        },
+
         hasConfirmed(eventId) {
             try {
                 const list = JSON.parse(localStorage.getItem('paniccheck_confirmed_events') || '[]');
@@ -374,16 +381,16 @@ function paniccheckApp() {
                         this.renderMarkers();
                     }
                 } else {
-                    this.showToast(data.message || 'Gagal mengirim konfirmasi.', 'error');
+                    if (res.status === 422) {
+                        this.markConfirmed(eventId);
+                        this.showToast(data.message || 'Anda sudah memberikan laporan awal atau konfirmasi untuk kejadian ini.', 'warning');
+                    } else {
+                        this.showToast(data.message || 'Gagal mengirim konfirmasi.', 'error');
+                    }
                 }
             } catch (err) {
-                this.markConfirmed(eventId);
-                this.showToast('✓ Konfirmasi berhasil dicatat!', 'success');
-                if (this.selectedEvent) {
-                    this.selectedEvent.reports_count = (this.selectedEvent.reports_count || 1) + 1;
-                    this.selectedEvent.status = 'ACTIVE';
-                    this.renderMarkers();
-                }
+                console.warn('Network error during confirmation:', err);
+                this.showToast('Gagal terhubung ke server untuk mengirim konfirmasi.', 'error');
             } finally {
                 this.isConfirming = false;
             }
@@ -658,11 +665,11 @@ function paniccheckApp() {
                 try { data = JSON.parse(text); } catch (_) {}
 
                 if (res.ok) {
-                    this.onReportSuccess(Object.fromEntries(formData), data.event_id);
+                    this.onReportSuccess(Object.fromEntries(formData), data.event_id, data.water_level);
                 } else {
                     const msg = data.message || (data.errors ? Object.values(data.errors).flat().join(', ') : 'Gagal mengirim laporan. Periksa kelengkapan form.');
                     this.reportError = msg; // item 3: shown inside modal, not below it
-                    this.showToast(msg, 'error');
+                    this.showToast(msg, 'warning');
                 }
             } catch (err) {
                 console.warn('Network error:', err);
@@ -674,7 +681,7 @@ function paniccheckApp() {
             }
         },
 
-        onReportSuccess(payload, eventId) {
+        onReportSuccess(payload, eventId, resolvedWaterLevel) {
             // Tutup modal dan bersihkan form
             this.showReportModal = false;
             if (this.photoPreview) URL.revokeObjectURL(this.photoPreview);
@@ -683,6 +690,9 @@ function paniccheckApp() {
             this.reportError = null;
             this.form.description = '';
 
+            // Kunci tombol konfirmasi agar pembuat laporan awal tidak self-confirm
+            this.markConfirmed(eventId);
+
             const lat = parseFloat(payload.latitude);
             const lng = parseFloat(payload.longitude);
 
@@ -690,7 +700,18 @@ function paniccheckApp() {
             const existing = this.events.find(e => e.id === eventId);
             if (existing) {
                 existing.reports_count = (existing.reports_count || 1) + 1;
-                existing.water_level = payload.water_level || existing.water_level;
+
+                // Terapkan Safety-First Worst-Case Bias (tidak menurunkan level bahaya secara gegabah)
+                if (resolvedWaterLevel) {
+                    existing.water_level = resolvedWaterLevel;
+                } else {
+                    const currentScore = this.getSeverityScore(existing.water_level);
+                    const newScore = this.getSeverityScore(payload.water_level);
+                    if (newScore > currentScore) {
+                        existing.water_level = payload.water_level;
+                    }
+                }
+
                 existing.status = 'ACTIVE';
                 existing.updated_at_human = 'Baru saja';
                 if (!existing.reports) existing.reports = [];
@@ -713,7 +734,7 @@ function paniccheckApp() {
                     status: 'ACTIVE',
                     latitude: lat,
                     longitude: lng,
-                    water_level: payload.water_level || 'selutut',
+                    water_level: resolvedWaterLevel || payload.water_level || 'selutut',
                     reports_count: 1,
                     is_verified: false,
                     location_name: this.guessLocationName(lat, lng, []),

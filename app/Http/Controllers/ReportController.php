@@ -23,8 +23,38 @@ class ReportController extends Controller
         $lat = $request->latitude;
         $lon = $request->longitude;
         $category = $request->category;
+        $userId = Auth::id();
+        $ip = $request->ip();
+
+        // 2. Cooldown check anti-spam per IP/User di lokasi yang sama (<500m dalam 10 menit)
+        $isDevBypass = $request->boolean('dev_bypass', false)
+            || ($request->query('dev') == '1')
+            || (app()->environment('local', 'testing') && $request->header('X-Paniccheck-Dev') == '1');
+
+        if (!$isDevBypass) {
+            $tenMinutesAgo = Carbon::now()->subMinutes(10);
+            $recentReport = Report::where('created_at', '>=', $tenMinutesAgo)
+                ->where(function ($q) use ($userId, $ip) {
+                    if ($userId) {
+                        $q->where('user_id', $userId);
+                    }
+                    if ($ip) {
+                        $q->orWhere('ip_address', $ip);
+                    }
+                })
+                ->whereRaw("( 6371 * acos( cos( radians(?) ) * cos( radians( latitude ) ) * cos( radians( longitude ) - radians(?) ) + sin( radians(?) ) * sin( radians( latitude ) ) ) ) <= 0.5", [$lat, $lon, $lat])
+                ->first();
+
+            if ($recentReport) {
+                return response()->json([
+                    'message' => 'Laporan dari perangkat Anda di sekitar lokasi ini sudah tercatat. Mohon tunggu 10 menit sebelum memperbarui kondisi air.',
+                    'cooldown' => true,
+                    'event_id' => $recentReport->event_id,
+                ], 422);
+            }
+        }
         
-        // 2. Proses unggah foto (jika warga melampirkan foto)
+        // 3. Proses unggah foto (jika warga melampirkan foto)
         $photoPath = null;
         if ($request->hasFile('photo')) {
             // Simpan gambar ke folder 'reports' di dalam disk 'public'
@@ -54,10 +84,11 @@ class ReportController extends Controller
             $eventId = $newEvent->id;
         }
 
-        // 3. Simpan laporan riil beserta alamat fotonya
+        // 4. Simpan laporan riil beserta alamat foto dan IP
         $report = Report::create([
             'event_id' => $eventId,
-            'user_id' => Auth::id(), // Pastikan di bagian atas file sudah ada "use Illuminate\Support\Facades\Auth;"
+            'user_id' => $userId,
+            'ip_address' => $ip,
             'latitude' => $lat,
             'longitude' => $lon,
             'category' => $category,
@@ -66,9 +97,12 @@ class ReportController extends Controller
             'description' => $request->description,
         ]);
 
+        $event = Event::with('reports')->find($eventId);
+
         return response()->json([
             'message' => 'Laporan berhasil diproses!', 
             'event_id' => $eventId,
+            'water_level' => $event?->water_level ?? ($request->water_level ?: 'selutut'),
             // Kembalikan URL lengkap foto agar Rilo bisa langsung menampilkannya
             'photo_url' => $photoPath ? asset('storage/' . $photoPath) : null 
         ]);

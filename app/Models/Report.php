@@ -9,6 +9,7 @@ class Report extends Model
     protected $fillable = [
         'event_id',
         'user_id',
+        'ip_address',
         'latitude',
         'longitude',
         'category',

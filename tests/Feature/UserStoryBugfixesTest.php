@@ -108,5 +108,163 @@ class UserStoryBugfixesTest extends TestCase
         $response->assertSee('calculateHaversine', false);
         $response->assertSee('PERINGATAN LEPTOSPIROSIS', false);
     }
+
+    /**
+     * Uji Masalah 1: Pembuat laporan awal tidak dapat melakukan konfirmasi silang ke laporannya sendiri.
+     */
+    public function test_user_or_ip_cannot_confirm_their_own_reported_event(): void
+    {
+        $citizen = User::create([
+            'name' => 'Warga Pelapor',
+            'email' => 'pelapor@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'user',
+        ]);
+
+        $event = Event::create([
+            'category' => 'Banjir',
+            'latitude' => -7.2892,
+            'longitude' => 112.7153,
+            'status' => 'ACTIVE',
+        ]);
+
+        // Catat bahwa pelapor awal adalah $citizen
+        Report::create([
+            'event_id' => $event->id,
+            'user_id' => $citizen->id,
+            'latitude' => -7.2892,
+            'longitude' => 112.7153,
+            'category' => 'Banjir',
+            'water_level' => 'sepinggang_keatas',
+        ]);
+
+        // Coba lakukan konfirmasi silang atas event miliknya sendiri
+        $response = $this->actingAs($citizen, 'sanctum')
+            ->postJson("/api/events/{$event->id}/confirm", [
+                'description' => 'Konfirmasi silang palsu sendiri',
+            ]);
+
+        $response->assertStatus(422)
+            ->assertJson([
+                'message' => 'Anda sudah memberikan laporan awal atau konfirmasi untuk kejadian ini.',
+            ]);
+    }
+
+    /**
+     * Uji Masalah 3: Konfirmasi ganda dari user atau IP yang sama ditolak (Anti-Double Voting).
+     */
+    public function test_duplicate_confirmation_from_same_ip_or_user_is_rejected(): void
+    {
+        $citizen = User::create([
+            'name' => 'Warga Saksi',
+            'email' => 'saksi_unik@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'user',
+        ]);
+
+        $event = Event::create([
+            'category' => 'Banjir',
+            'latitude' => -7.2892,
+            'longitude' => 112.7153,
+            'status' => 'ACTIVE',
+        ]);
+
+        // Konfirmasi pertama sukses
+        $res1 = $this->actingAs($citizen, 'sanctum')
+            ->postJson("/api/events/{$event->id}/confirm", [
+                'description' => 'Air masih tinggi',
+            ]);
+        $res1->assertStatus(200);
+
+        // Konfirmasi kedua dari user yang sama ditolak
+        $res2 = $this->actingAs($citizen, 'sanctum')
+            ->postJson("/api/events/{$event->id}/confirm", [
+                'description' => 'Mencoba vote lagi',
+            ]);
+        $res2->assertStatus(422);
+    }
+
+    /**
+     * Uji Masalah 2: Laporan ketinggian air lebih rendah tidak langsung menimpa status bahaya (Safety-First).
+     */
+    public function test_lower_water_level_report_does_not_immediately_overwrite_deep_flood(): void
+    {
+        $event = Event::create([
+            'category' => 'Banjir',
+            'latitude' => -7.2892,
+            'longitude' => 112.7153,
+            'status' => 'ACTIVE',
+        ]);
+
+        // Laporan awal banjir dalam: sepinggang_keatas
+        Report::create([
+            'event_id' => $event->id,
+            'latitude' => -7.2892,
+            'longitude' => 112.7153,
+            'category' => 'Banjir',
+            'water_level' => 'sepinggang_keatas',
+            'created_at' => Carbon::now()->subMinutes(15),
+        ]);
+
+        $this->assertEquals('sepinggang_keatas', $event->fresh()->water_level);
+
+        // Satu laporan baru masuk menyatakan semata_kaki
+        Report::create([
+            'event_id' => $event->id,
+            'latitude' => -7.2892,
+            'longitude' => 112.7153,
+            'category' => 'Banjir',
+            'water_level' => 'semata_kaki',
+            'created_at' => Carbon::now(),
+        ]);
+
+        // Status event TETAP sepinggang_keatas karena belum ada konsensus 2 laporan berturut-turut
+        $this->assertEquals('sepinggang_keatas', $event->fresh()->water_level);
+
+        // Laporan kedua berturut-turut masuk menyatakan semata_kaki (konsensus tercapai)
+        Report::create([
+            'event_id' => $event->id,
+            'latitude' => -7.2892,
+            'longitude' => 112.7153,
+            'category' => 'Banjir',
+            'water_level' => 'semata_kaki',
+            'created_at' => Carbon::now(),
+        ]);
+
+        // Status event sekarang secara sah terde-eskalasi ke semata_kaki
+        $this->assertEquals('semata_kaki', $event->fresh()->water_level);
+    }
+
+    /**
+     * Uji Masalah 3: Cooldown pelaporan 10 menit untuk lokasi yang sama (<500m) dari IP yang sama.
+     */
+    public function test_report_cooldown_within_10_minutes_at_same_location(): void
+    {
+        // Laporan pertama sukses
+        $res1 = $this->withServerVariables(['REMOTE_ADDR' => '192.168.1.100'])
+            ->postJson('/api/reports', [
+                'latitude' => -7.289200,
+                'longitude' => 112.715300,
+                'category' => 'Banjir',
+                'water_level' => 'sepinggang_keatas',
+                'description' => 'Laporan awal',
+            ]);
+        $res1->assertStatus(200);
+
+        // Laporan kedua dari IP yang sama di lokasi yang sama (<500m) dalam 10 menit
+        $res2 = $this->withServerVariables(['REMOTE_ADDR' => '192.168.1.100'])
+            ->postJson('/api/reports', [
+                'latitude' => -7.289300,
+                'longitude' => 112.715400,
+                'category' => 'Banjir',
+                'water_level' => 'sepinggang_keatas',
+                'description' => 'Laporan spam cepat',
+            ]);
+
+        $res2->assertStatus(422)
+            ->assertJson([
+                'cooldown' => true,
+            ]);
+    }
 }
 

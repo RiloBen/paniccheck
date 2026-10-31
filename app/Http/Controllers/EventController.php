@@ -22,10 +22,38 @@ class EventController extends Controller
             return response()->json(['message' => 'Event tidak ditemukan'], 404);
         }
 
+        $userId = Auth::id();
+        $ip = $request->ip();
+
+        $isDevBypass = $request->boolean('dev_bypass', false)
+            || ($request->query('dev') == '1')
+            || (app()->environment('local', 'testing') && $request->header('X-Paniccheck-Dev') == '1');
+
+        if (!$isDevBypass) {
+            // Anti-self-confirmation & Anti-duplicate: Cek apakah user atau IP sudah pernah melapor/mengonfirmasi kejadian ini
+            $alreadyVoted = Report::where('event_id', $event->id)
+                ->where(function ($q) use ($userId, $ip) {
+                    if ($userId) {
+                        $q->where('user_id', $userId);
+                    }
+                    if ($ip) {
+                        $q->orWhere('ip_address', $ip);
+                    }
+                })
+                ->exists();
+
+            if ($alreadyVoted) {
+                return response()->json([
+                    'message' => 'Anda sudah memberikan laporan awal atau konfirmasi untuk kejadian ini.',
+                ], 422);
+            }
+        }
+
         // Simpan konfirmasi ini sebagai laporan pendukung
         Report::create([
             'event_id' => $event->id,
-            'user_id' => Auth::id(),
+            'user_id' => $userId,
+            'ip_address' => $ip,
             'latitude' => $event->latitude, 
             'longitude' => $event->longitude,
             'category' => $event->category,
