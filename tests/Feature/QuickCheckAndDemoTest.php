@@ -118,5 +118,35 @@ class QuickCheckAndDemoTest extends TestCase
         $this->assertTrue(Event::where('status', 'STALE')->exists());
         $this->assertTrue(Event::where('status', 'RESOLVED')->exists());
     }
+
+    /**
+     * Uji M10 Quick Check Scanner: Mendeteksi level air dan mencocokkan nama jalan event aktif.
+     */
+    public function test_quick_check_scanner_detects_water_level_and_matches_active_event(): void
+    {
+        $event = Event::create([
+            'category' => 'Banjir',
+            'location_name' => 'Jl. Mayjen Sungkono',
+            'latitude' => -7.2892,
+            'longitude' => 112.7153,
+            'status' => 'ACTIVE',
+        ]);
+
+        $response = $this->postJson('/api/quick-check', [
+            'text' => 'Info banjir lur, daerah mayjen sungkono air sudah sepinggang!',
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'status' => 'success',
+                'extracted_data' => [
+                    'water_level' => 'sepinggang_keatas',
+                    'location_hint' => 'Jl. Mayjen Sungkono',
+                    'event_id' => $event->id,
+                    'latitude' => -7.2892,
+                    'longitude' => 112.7153,
+                ],
+            ]);
+    }
 }
 

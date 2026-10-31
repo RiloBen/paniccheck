@@ -9,6 +9,7 @@ class Event extends Model
     // Mengizinkan kolom ini diisi data secara otomatis
     protected $fillable = [
         'category',
+        'location_name',
         'latitude',
         'longitude',
         'status',
