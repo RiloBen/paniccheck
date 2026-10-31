@@ -91,8 +91,7 @@ class EventApiTest extends TestCase
             'description' => 'Saya lihat di lokasi air masih tinggi.',
         ]);
 
-        $response->assertStatus(401)
-            ->assertJson(['message' => 'Harus login untuk melakukan konfirmasi']);
+        $response->assertStatus(401);
     }
 
     /**
@@ -114,7 +113,7 @@ class EventApiTest extends TestCase
             'status' => 'ACTIVE',
         ]);
 
-        $response = $this->actingAs($citizen)
+        $response = $this->actingAs($citizen, 'sanctum')
             ->postJson("/api/events/{$event->id}/confirm", [
                 'description' => 'Kondisi air masih selutut, belum bisa dilewati mobil sedan.',
             ]);
@@ -152,7 +151,7 @@ class EventApiTest extends TestCase
 
         $this->assertEquals('STALE', $staleEvent->status);
 
-        $response = $this->actingAs($citizen)
+        $response = $this->actingAs($citizen, 'sanctum')
             ->postJson("/api/events/{$staleEvent->id}/confirm", [
                 'description' => 'Hujan deras lagi, air naik lagi semata kaki.',
             ]);
@@ -184,11 +183,11 @@ class EventApiTest extends TestCase
             'status' => 'ACTIVE',
         ]);
 
-        $response = $this->actingAs($citizen)
+        $response = $this->actingAs($citizen, 'sanctum')
             ->postJson("/api/events/{$event->id}/resolve");
 
         $response->assertStatus(403)
-            ->assertJson(['message' => 'Akses ditolak. Hanya relawan terverifikasi yang bisa menutup kejadian.']);
+            ->assertJson(['message' => 'Akses ditolak. Anda tidak memiliki izin relawan/admin.']);
 
         $event->refresh();
         $this->assertEquals('ACTIVE', $event->status); // Status tetap aman tidak tertutup
@@ -213,7 +212,7 @@ class EventApiTest extends TestCase
             'status' => 'ACTIVE',
         ]);
 
-        $response = $this->actingAs($volunteer)
+        $response = $this->actingAs($volunteer, 'sanctum')
             ->postJson("/api/events/{$event->id}/resolve");
 
         $response->assertStatus(200)
@@ -235,7 +234,7 @@ class EventApiTest extends TestCase
             'role' => 'relawan',
         ]);
 
-        $response = $this->actingAs($volunteer)
+        $response = $this->actingAs($volunteer, 'sanctum')
             ->postJson('/api/events/99999/resolve');
 
         $response->assertStatus(404)

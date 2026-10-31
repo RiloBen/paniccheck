@@ -163,5 +163,104 @@ class ReportApiTest extends TestCase
         $response->assertStatus(422)
             ->assertJsonValidationErrors(['latitude', 'longitude', 'category']);
     }
+
+    /**
+     * Uji GET /api/my-reports membutuhkan otentikasi login (HTTP 401).
+     */
+    public function test_my_reports_requires_authentication(): void
+    {
+        $response = $this->getJson('/api/my-reports');
+
+        $response->assertStatus(401);
+    }
+
+    /**
+     * Uji pengguna login dapat mengambil riwayat laporan pribadi beserta status kejadian (FR-1 / PRD).
+     */
+    public function test_authenticated_user_can_view_own_report_history(): void
+    {
+        $user1 = \App\Models\User::create([
+            'name' => 'Warga Pelapor 1',
+            'email' => 'pelapor1@example.com',
+            'password' => \Illuminate\Support\Facades\Hash::make('password123'),
+            'role' => 'user',
+        ]);
+
+        $user2 = \App\Models\User::create([
+            'name' => 'Warga Pelapor 2',
+            'email' => 'pelapor2@example.com',
+            'password' => \Illuminate\Support\Facades\Hash::make('password123'),
+            'role' => 'user',
+        ]);
+
+        $event = Event::create([
+            'category' => 'Banjir',
+            'latitude' => -7.2892,
+            'longitude' => 112.7153,
+            'status' => 'ACTIVE',
+        ]);
+
+        // Laporan milik user1 (2 laporan dengan waktu berbeda)
+        $report1 = Report::create([
+            'event_id' => $event->id,
+            'user_id' => $user1->id,
+            'latitude' => -7.2892,
+            'longitude' => 112.7153,
+            'category' => 'Banjir',
+            'water_level' => 'selutut',
+            'description' => 'Laporan pertama user 1',
+        ]);
+        $report1->forceFill(['created_at' => Carbon::now()->subHours(2)])->save();
+
+        $report2 = Report::create([
+            'event_id' => $event->id,
+            'user_id' => $user1->id,
+            'latitude' => -7.2893,
+            'longitude' => 112.7154,
+            'category' => 'Banjir',
+            'water_level' => 'sepinggang_keatas',
+            'description' => 'Laporan kedua user 1',
+        ]);
+        $report2->forceFill(['created_at' => Carbon::now()->subMinutes(5)])->save();
+
+        // Laporan milik user2 (1 laporan)
+        Report::create([
+            'event_id' => $event->id,
+            'user_id' => $user2->id,
+            'latitude' => -7.2894,
+            'longitude' => 112.7155,
+            'category' => 'Banjir',
+            'water_level' => 'semata_kaki',
+            'description' => 'Laporan milik user 2',
+        ]);
+
+        $response = $this->actingAs($user1, 'sanctum')
+            ->getJson('/api/my-reports');
+
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'message',
+                'data' => [
+                    '*' => [
+                        'id',
+                        'event_id',
+                        'water_level',
+                        'description',
+                        'event' => ['id', 'status'],
+                    ]
+                ]
+            ]);
+
+        // Hanya menerima 2 laporan milik user1
+        $data = $response->json('data');
+        $this->assertCount(2, $data);
+
+        // Terurut latest first (report2 terbaru berada di index 0)
+        $this->assertEquals($report2->id, $data[0]['id']);
+        $this->assertEquals($report1->id, $data[1]['id']);
+
+        // Membawa status event
+        $this->assertEquals('ACTIVE', $data[0]['event']['status']);
+    }
 }
 
