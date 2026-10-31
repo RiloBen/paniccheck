@@ -6,6 +6,8 @@ use App\Models\Event;
 use App\Models\Report;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class ReportApiTest extends TestCase
@@ -45,6 +47,35 @@ class ReportApiTest extends TestCase
             'category' => 'Banjir',
             'status' => 'ACTIVE',
         ]);
+    }
+
+    /**
+     * Uji pelaporan bencana menyertakan unggahan foto (FR-1 / M2).
+     */
+    public function test_report_with_photo_upload_stores_file_and_returns_photo_url(): void
+    {
+        Storage::fake('public');
+
+        $file = UploadedFile::fake()->image('flood.jpg', 600, 400)->size(1500);
+
+        $response = $this->post('/api/reports', [
+            'latitude' => -7.2892,
+            'longitude' => 112.7153,
+            'category' => 'Banjir',
+            'water_level' => 'sepinggang_keatas',
+            'description' => 'Foto bukti air tinggi',
+            'photo' => $file,
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJsonStructure(['message', 'event_id', 'photo_url']);
+
+        $report = Report::where('description', 'Foto bukti air tinggi')->first();
+        $this->assertNotNull($report);
+        $this->assertNotNull($report->photo_path);
+        Storage::disk('public')->assertExists($report->photo_path);
     }
 
     /**

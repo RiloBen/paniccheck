@@ -69,6 +69,7 @@ function paniccheckApp() {
         quickCheckResult: null,
         photoPreview: null,
         photoFile: null,
+        reportError: null,
         userCoords: { latitude: -7.2819, longitude: 112.7483 }, // Default Surabaya
         isDetectingUserCoords: false,
 
@@ -563,6 +564,7 @@ function paniccheckApp() {
 
         openReportModal() {
             this.selectedEvent = null;
+            this.reportError = null;
             this.showReportModal = true;
             if (!this.locationAccuracy) {
                 this.detectGPS();
@@ -571,6 +573,7 @@ function paniccheckApp() {
 
         openReportWithCoordinates(lat, lng) {
             this.selectedEvent = null;
+            this.reportError = null;
             this.form.latitude = lat;
             this.form.longitude = lng;
             this.locationAccuracy = 10;
@@ -606,14 +609,16 @@ function paniccheckApp() {
 
         handlePhotoChange(e) {
             const file = e.target.files[0];
-            if (file) {
-                this.photoFile = file;
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    this.photoPreview = event.target.result;
-                };
-                reader.readAsDataURL(file);
+            if (!file) return;
+            // shortcut: hard reject >2MB client-side to match server cap; compress when upgrade needed
+            if (file.size > 2 * 1024 * 1024) {
+                this.showToast('Foto terlalu besar (maks 2MB). Gunakan foto beresolusi lebih rendah.', 'error');
+                e.target.value = '';
+                return;
             }
+            this.photoFile = file;
+            if (this.photoPreview) URL.revokeObjectURL(this.photoPreview);
+            this.photoPreview = URL.createObjectURL(file);
         },
 
         async submitReport() {
@@ -623,16 +628,14 @@ function paniccheckApp() {
             }
 
             this.isSubmitting = true;
+            this.reportError = null;
 
-            // UBAH: Gunakan FormData agar bisa membawa file foto fisik
             const formData = new FormData();
             formData.append('latitude', this.form.latitude);
             formData.append('longitude', this.form.longitude);
             formData.append('category', this.form.category);
             formData.append('water_level', this.form.water_level);
             formData.append('description', this.form.description);
-            
-            // Masukkan foto ke dalam paket kiriman jika warga melampirkannya
             if (this.photoFile) {
                 formData.append('photo', this.photoFile);
             }
@@ -644,23 +647,27 @@ function paniccheckApp() {
                     headers: {
                         'Accept': 'application/json',
                         'X-CSRF-TOKEN': csrfToken || ''
-                        // PENTING: 'Content-Type' tidak boleh ditulis di sini. 
-                        // Browser akan otomatis mengatur boundary multipart/form-data.
+                        // Content-Type omitted: browser sets multipart boundary automatically
                     },
-                    body: formData // Kirim formData, bukan JSON.stringify
+                    body: formData
                 });
 
-                const data = await res.json().catch(() => ({}));
+                // Parse response — guard against PHP warnings polluting JSON (item 2)
+                const text = await res.text();
+                let data = {};
+                try { data = JSON.parse(text); } catch (_) {}
 
                 if (res.ok) {
-                    this.onReportSuccess(Object.fromEntries(formData), data.event_id); 
+                    this.onReportSuccess(Object.fromEntries(formData), data.event_id);
                 } else {
-                    const errorMsg = data.message || (data.errors ? Object.values(data.errors).flat().join(', ') : 'Gagal mengirim laporan. Periksa kelengkapan form.');
-                    this.showToast(errorMsg, 'error');
+                    const msg = data.message || (data.errors ? Object.values(data.errors).flat().join(', ') : 'Gagal mengirim laporan. Periksa kelengkapan form.');
+                    this.reportError = msg; // item 3: shown inside modal, not below it
+                    this.showToast(msg, 'error');
                 }
             } catch (err) {
                 console.warn('Network error:', err);
-                this.showToast('Gagal terhubung ke server. Menggunakan mode darurat lokal.', 'warning');
+                this.reportError = 'Gagal terhubung ke server. Menggunakan mode darurat lokal.';
+                this.showToast(this.reportError, 'warning');
                 this.onReportSuccess(Object.fromEntries(formData), Date.now());
             } finally {
                 this.isSubmitting = false;
@@ -670,8 +677,10 @@ function paniccheckApp() {
         onReportSuccess(payload, eventId) {
             // Tutup modal dan bersihkan form
             this.showReportModal = false;
+            if (this.photoPreview) URL.revokeObjectURL(this.photoPreview);
             this.photoPreview = null;
             this.photoFile = null;
+            this.reportError = null;
             this.form.description = '';
 
             const lat = parseFloat(payload.latitude);
