@@ -52,15 +52,17 @@
         }
     </style>
 </head>
-<body class="h-full flex flex-col overflow-hidden select-none" x-data="{
-    toast: { show: false, message: '', type: 'success' },
-    showToast(msg, type = 'success') {
-        this.toast.message = msg;
-        this.toast.type = type;
-        this.toast.show = true;
-        setTimeout(() => this.toast.show = false, 3500);
-    }
-}">
+<body class="h-full flex flex-col overflow-hidden select-none" 
+      x-data="{
+          toast: { show: false, message: '', type: 'success' },
+          showToast(msg, type = 'success') {
+              this.toast.message = msg;
+              this.toast.type = type;
+              this.toast.show = true;
+              setTimeout(() => this.toast.show = false, 3500);
+          }
+      }"
+      @show-toast.window="showToast($event.detail.msg, $event.detail.type)">
 
     <!-- Top Navigation Bar -->
     <header class="h-14 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 flex items-center justify-between z-30 flex-shrink-0">
