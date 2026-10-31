@@ -105,12 +105,84 @@ function paniccheckApp() {
             try {
                 const res = await fetch('/api/events');
                 if (res.ok) {
-                    this.events = await res.json();
+                    const json = await res.json();
+                    const rawList = Array.isArray(json) ? json : (json.data || []);
+                    if (rawList.length > 0) {
+                        this.events = rawList.map(ev => ({
+                            id: ev.id,
+                            category: ev.category || 'banjir',
+                            status: ev.status || 'ACTIVE',
+                            latitude: parseFloat(ev.latitude),
+                            longitude: parseFloat(ev.longitude),
+                            water_level: ev.water_level || (ev.reports && ev.reports.length ? ev.reports[ev.reports.length - 1].water_level : 'selutut'),
+                            reports_count: ev.reports_count || (ev.reports ? ev.reports.length : 1),
+                            is_verified: !!ev.is_verified,
+                            location_name: ev.location_name || ('Titik Koordinat ' + parseFloat(ev.latitude).toFixed(4) + ', ' + parseFloat(ev.longitude).toFixed(4)),
+                            updated_at_human: ev.updated_at_human || 'Baru saja'
+                        }));
+                    } else {
+                        this.events = this.getDemoEvents();
+                    }
                     this.renderMarkers();
                 }
             } catch (err) {
                 console.warn('Gagal memuat API events, menggunakan mock lokal:', err);
+                this.events = this.getDemoEvents();
+                this.renderMarkers();
             }
+        },
+
+        getDemoEvents() {
+            return [
+                {
+                    id: 1,
+                    category: 'banjir',
+                    status: 'ACTIVE',
+                    latitude: -7.2892,
+                    longitude: 112.7153,
+                    water_level: 'sepinggang_keatas',
+                    reports_count: 6,
+                    is_verified: true,
+                    location_name: 'Jl. Mayjen Sungkono (Dekat Ciputra World)',
+                    updated_at_human: '8 menit lalu'
+                },
+                {
+                    id: 2,
+                    category: 'banjir',
+                    status: 'STALE',
+                    latitude: -7.2858,
+                    longitude: 112.7383,
+                    water_level: 'semata_kaki',
+                    reports_count: 2,
+                    is_verified: false,
+                    location_name: 'Jl. Raya Darmo (Depan Taman Bungkul)',
+                    updated_at_human: '2 jam 15 mnt lalu'
+                },
+                {
+                    id: 3,
+                    category: 'banjir',
+                    status: 'ACTIVE',
+                    latitude: -7.2797,
+                    longitude: 112.7758,
+                    water_level: 'selutut',
+                    reports_count: 4,
+                    is_verified: true,
+                    location_name: 'Jl. Raya Kertajaya Indah',
+                    updated_at_human: '25 menit lalu'
+                },
+                {
+                    id: 4,
+                    category: 'banjir',
+                    status: 'RESOLVED',
+                    latitude: -7.2705,
+                    longitude: 112.7562,
+                    water_level: 'semata_kaki',
+                    reports_count: 5,
+                    is_verified: true,
+                    location_name: 'Jl. Dharmawangsa (Depan RSUD Dr. Soetomo)',
+                    updated_at_human: '45 menit lalu'
+                }
+            ];
         },
 
         renderMarkers() {
