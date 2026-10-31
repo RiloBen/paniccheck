@@ -36,8 +36,8 @@ class ReportController extends Controller
         $closestEvent = Event::where('category', $category)
             ->where('status', 'ACTIVE')
             ->where('updated_at', '>=', $twoHoursAgo)
+            ->whereRaw("( 6371 * acos( cos( radians(?) ) * cos( radians( latitude ) ) * cos( radians( longitude ) - radians(?) ) + sin( radians(?) ) * sin( radians( latitude ) ) ) ) <= 0.5", [$lat, $lon, $lat])
             ->selectRaw("*, ( 6371 * acos( cos( radians(?) ) * cos( radians( latitude ) ) * cos( radians( longitude ) - radians(?) ) + sin( radians(?) ) * sin( radians( latitude ) ) ) ) AS distance", [$lat, $lon, $lat])
-            ->having('distance', '<=', 0.5)
             ->orderBy('distance')
             ->first();
 

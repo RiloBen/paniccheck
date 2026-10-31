@@ -5,24 +5,25 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\EventController;
 use App\Http\Controllers\AuthController;
 
-// Rute untuk pendaftaran dan login
+// Rute publik untuk pendaftaran dan login
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
-// Rute untuk warga melakukan konfirmasi
-Route::post('/events/{id}/confirm', [EventController::class, 'confirm']);
-
-// Rute untuk relawan melakukan penutupan
-Route::post('/events/{id}/resolve', [EventController::class, 'resolve']);
-
+// Rute pelaporan darurat warga tanpa login (M2)
 Route::post('/reports', [ReportController::class, 'store']);
 
-// Rute untuk peta Rilo mengambil seluruh data kordinat banjir
+// Rute untuk peta Rilo mengambil seluruh data kordinat banjir (M4)
 Route::get('/events', [EventController::class, 'index']);
 
-// Rute untuk melihat riwayat laporan sendiri (wajib login / dijaga satpam Sanctum)
-Route::middleware('auth:sanctum')->get('/my-reports', [ReportController::class, 'history']);
+// Rute yang membutuhkan otentikasi Sanctum
+Route::middleware('auth:sanctum')->group(function () {
+    // Warga login melakukan konfirmasi silang (M6)
+    Route::post('/events/{id}/confirm', [EventController::class, 'confirm']);
 
-// Rute untuk relawan melakukan penutupan (DIJAGA KETAT)
-Route::middleware(['auth:sanctum', 'role:admin,relawan'])
-     ->post('/events/{id}/resolve', [EventController::class, 'resolve']);
+    // Melihat riwayat laporan pribadi
+    Route::get('/my-reports', [ReportController::class, 'history']);
+
+    // Penutupan event banjir hanya oleh relawan terverifikasi atau admin (M6)
+    Route::middleware('role:admin,relawan')
+        ->post('/events/{id}/resolve', [EventController::class, 'resolve']);
+});

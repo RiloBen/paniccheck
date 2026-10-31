@@ -39,9 +39,12 @@ class CleanupOldPhotos extends Command
                         $this->info("Berhasil menghapus fisik file: " . $report->photo_path);
                         $deletedCount++;
                     } else {
-                        // 3. Peringatan merah jika path database tidak cocok dengan folder lokal
-                        $this->error("GAGAL: File fisik tidak ditemukan di path: " . $report->photo_path);
+                        // 3. Peringatan jika file fisik sudah tidak ada di storage
+                        $this->warn("File fisik sudah tidak ditemukan di path: " . $report->photo_path);
                     }
+
+                    // Sinkronkan database: kosongkan photo_path agar tidak terjadi broken image link
+                    $report->update(['photo_path' => null]);
                 }
             }
         }
