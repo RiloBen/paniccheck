@@ -66,13 +66,25 @@ class EventController extends Controller
     }
 
     // Fitur 3: Mengirim data kejadian banjir ke peta Rilo
-    public function index()
+    public function index(Request $request)
     {
-        // Hanya ambil event yang statusnya ACTIVE atau STALE
-        $events = Event::whereIn('status', ['ACTIVE', 'STALE'])
-            // Opsional: Bawa serta data laporan (waktu dan tinggi air) agar Rilo bisa memunculkannya saat pin diklik
+        // Auto-transisi dinamis (PRD 8.3 M7): Jika ada event ACTIVE yang tidak ada update > 2 jam, ubah jadi STALE
+        $twoHoursAgo = \Carbon\Carbon::now()->subHours(2);
+        Event::where('status', 'ACTIVE')
+            ->where('updated_at', '<', $twoHoursAgo)
+            ->update(['status' => 'STALE']);
+
+        $statusList = ['ACTIVE', 'STALE'];
+
+        // Jika parameter include_resolved=1 atau status=all, sertakan event yang sudah surut (RESOLVED)
+        if ($request->boolean('include_resolved', false) || $request->query('status') === 'all') {
+            $statusList[] = 'RESOLVED';
+        }
+
+        $events = Event::whereIn('status', $statusList)
+            // Bawa serta data laporan (waktu, tinggi air, foto, dan status konfirmasi) untuk linimasa M6
             ->with(['reports' => function($query) {
-                $query->select('id', 'event_id', 'water_level', 'description', 'created_at');
+                $query->select('id', 'event_id', 'water_level', 'description', 'photo_path', 'is_confirmation', 'created_at');
             }])
             ->get();
 

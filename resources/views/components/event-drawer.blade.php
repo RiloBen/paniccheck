@@ -1,4 +1,4 @@
-<!-- Event Detail Drawer / Quick Preview Card -->
+<!-- Event Detail Drawer / Quick Preview Card (M5 & M6) -->
 <div x-cloak x-show="selectedEvent !== null"
      x-transition:enter="transition ease-out duration-300"
      x-transition:enter-start="opacity-0 translate-y-full"
@@ -9,7 +9,7 @@
      class="fixed bottom-0 inset-x-0 z-40 max-w-lg mx-auto p-4 pointer-events-none">
 
     <template x-if="selectedEvent">
-        <div class="bg-slate-900/95 border border-slate-700/80 rounded-2xl shadow-2xl backdrop-blur-md p-5 text-slate-100 pointer-events-auto space-y-4">
+        <div class="bg-slate-900/95 border border-slate-700/80 rounded-2xl shadow-2xl backdrop-blur-md p-5 text-slate-100 pointer-events-auto space-y-4 max-h-[85vh] overflow-y-auto">
             <!-- Header bar with handle & close button -->
             <div class="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div class="flex items-center space-x-2">
@@ -74,28 +74,124 @@
                 </div>
             </template>
 
-            <!-- Resolved Alert & Leptospirosis Warning (PRD S8) -->
+            <!-- Resolved Alert & Leptospirosis Warning (PRD S8) - Berbasis Jarak Pengguna -->
             <template x-if="selectedEvent.status === 'RESOLVED'">
-                <div class="bg-emerald-950/40 border border-emerald-600/50 p-3 rounded-xl text-xs text-emerald-200 space-y-1">
-                    <div class="font-bold flex items-center space-x-1.5 text-emerald-400">
-                        <span>✓</span>
-                        <span>Genangan Resmi Dinyatakan Surut</span>
-                    </div>
-                    <p class="text-[11px] text-slate-300">
-                        🛡️ <strong>Waspada Leptospirosis (H+1 s/d H+14):</strong> Gunakan alas kaki tertutup dan segera cuci area kulit dengan sabun jika berkontak dengan sisa lumpur atau genangan air.
-                    </p>
+                <div class="space-y-2">
+                    <!-- Jika Pengguna Terdeteksi Dekat (<= 500 meter) dari Titik Banjir -->
+                    <template x-if="getDistanceToEvent(selectedEvent) !== null && getDistanceToEvent(selectedEvent) <= 500">
+                        <div class="bg-red-950/80 border-2 border-red-500/80 p-3.5 rounded-xl text-xs text-red-100 space-y-1.5 shadow-xl shadow-red-950/50">
+                            <div class="font-extrabold flex items-center space-x-1.5 text-red-400 text-xs tracking-wide">
+                                <span class="animate-ping inline-block h-2 w-2 rounded-full bg-red-400"></span>
+                                <span>⚠️ PERINGATAN LEPTOSPIROSIS (JARAK <span x-text="getDistanceToEvent(selectedEvent) + 'M'"></span>)</span>
+                            </div>
+                            <p class="text-[11px] text-red-200 leading-relaxed font-medium">
+                                Anda terdeteksi berada di zona genangan yang baru surut! Waspada Leptospirosis melalui luka terbuka & air kotor. Selalu gunakan alas kaki tertutup dan segera cuci kulit dengan sabun antiseptik (masa inkubasi 1–14 hari).
+                            </p>
+                        </div>
+                    </template>
+
+                    <!-- Jika Pengguna Berada Jauh (> 500 meter) atau Lokasi Belum Terdeteksi -->
+                    <template x-if="getDistanceToEvent(selectedEvent) === null || getDistanceToEvent(selectedEvent) > 500">
+                        <div class="bg-emerald-950/40 border border-emerald-600/50 p-3 rounded-xl text-xs text-emerald-200 space-y-1">
+                            <div class="font-bold flex items-center space-x-1.5 text-emerald-400">
+                                <span>✓</span>
+                                <span>Genangan Resmi Dinyatakan Surut</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">
+                                Jalur ini telah surut total dan aman dilalui kendaraan.
+                                <span class="text-slate-400 block mt-0.5 text-[10px]" 
+                                      x-show="getDistanceToEvent(selectedEvent) !== null" 
+                                      x-text="'Jarak dari posisi Anda: ' + (getDistanceToEvent(selectedEvent) >= 1000 ? (getDistanceToEvent(selectedEvent)/1000).toFixed(1) + ' km' : getDistanceToEvent(selectedEvent) + ' m')"></span>
+                            </p>
+                        </div>
+                    </template>
                 </div>
             </template>
 
-            <!-- Action buttons -->
-            <div class="flex items-center space-x-2 pt-1">
-                <button @click="openReportWithCoordinates(selectedEvent.latitude, selectedEvent.longitude)"
-                        class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-lg shadow-blue-600/30 transition">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    <span>Lapor Update di Lokasi Ini</span>
-                </button>
+            <!-- M5: Linimasa Vertikal Laporan Warga (Append-only Timeline) -->
+            <div class="space-y-2 pt-1 border-t border-slate-800">
+                <div class="flex items-center justify-between text-xs text-slate-400">
+                    <span class="font-bold text-white flex items-center space-x-1">
+                        <span>📜 Linimasa Laporan</span>
+                        <span class="text-slate-500 font-normal" x-text="'(' + (selectedEvent.reports ? selectedEvent.reports.length : 1) + ' data)'"></span>
+                    </span>
+                    <span class="text-[10px]">Kronologis Warga</span>
+                </div>
+
+                <div class="space-y-2 max-h-36 overflow-y-auto pr-1">
+                    <template x-if="selectedEvent.reports && selectedEvent.reports.length > 0">
+                        <div>
+                            <template x-for="(rep, idx) in selectedEvent.reports" :key="rep.id || idx">
+                                <div class="bg-slate-800/60 border border-slate-700/50 rounded-xl p-2.5 text-xs space-y-1 relative mb-2">
+                                    <div class="flex items-center justify-between text-[11px]">
+                                        <span class="font-semibold text-slate-200 flex items-center space-x-1">
+                                            <span x-text="rep.is_confirmation ? '🤝 Konfirmasi Warga' : '🚨 Laporan Awal'"></span>
+                                        </span>
+                                        <span class="text-slate-400 text-[10px]" x-text="formatTimeAgo(rep.created_at)"></span>
+                                    </div>
+
+                                    <p class="text-slate-300 text-[11px]" x-text="rep.description || 'Tidak ada deskripsi rinci.'"></p>
+
+                                    <!-- Foto Bukti Lapangan Jika Ada -->
+                                    <template x-if="rep.photo_path">
+                                        <div class="mt-1">
+                                            <img :src="'/storage/' + rep.photo_path" 
+                                                 alt="Bukti foto banjir" 
+                                                 class="h-16 w-auto rounded-lg border border-slate-700 object-cover cursor-pointer hover:opacity-90 transition">
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                    <template x-if="!selectedEvent.reports || selectedEvent.reports.length === 0">
+                        <div class="bg-slate-800/40 rounded-xl p-2 text-center text-slate-400 text-xs">
+                            Laporan utama tervalidasi via sistem agregasi.
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- M6: Action Buttons (Konfirmasi Warga & Penutupan Relawan) -->
+            <div class="pt-2 border-t border-slate-800 space-y-2">
+                <template x-if="selectedEvent.status !== 'RESOLVED'">
+                    <div class="grid grid-cols-2 gap-2">
+                        <!-- Tombol Konfirmasi Silang Warga (Maksimal 1 Suara per Sesi/Perangkat) -->
+                        <template x-if="!hasConfirmed(selectedEvent.id)">
+                            <button @click="confirmFlood(selectedEvent.id)"
+                                    :disabled="isConfirming"
+                                    class="bg-amber-600 hover:bg-amber-500 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-lg shadow-amber-600/20 active:scale-95 transition disabled:opacity-50">
+                                <span>🤝</span>
+                                <span>Masih Banjir</span>
+                            </button>
+                        </template>
+
+                        <template x-if="hasConfirmed(selectedEvent.id)">
+                            <button disabled
+                                    class="bg-slate-800 border border-slate-700 text-slate-400 font-semibold py-2 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 cursor-not-allowed">
+                                <span>✓</span>
+                                <span>Telah Dikonfirmasi</span>
+                            </button>
+                        </template>
+
+                        <!-- Tombol Penutupan Relawan / Admin (Terproteksi Role) -->
+                        <button @click="resolveFlood(selectedEvent.id)"
+                                :disabled="isResolving"
+                                class="bg-emerald-600/90 hover:bg-emerald-500 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-lg shadow-emerald-600/20 active:scale-95 transition disabled:opacity-50">
+                            <span>🛡️</span>
+                            <span>Tandai Surut</span>
+                        </button>
+                    </div>
+                </template>
+
+                <div class="flex items-center space-x-2">
+                    <button @click="openReportWithCoordinates(selectedEvent.latitude, selectedEvent.longitude)"
+                            class="flex-1 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-semibold py-2 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow transition">
+                        <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        <span>Kirim Foto / Laporan Tambahan</span>
+                    </button>
+                </div>
             </div>
         </div>
     </template>
 </div>
-
