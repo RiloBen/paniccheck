@@ -1,8 +1,8 @@
 <!-- M10: Floating Quick Check / Paste Text Scanner (Letak Paling Atas Layar) -->
 <div class="absolute top-3 inset-x-0 z-30 px-3 sm:px-4 max-w-lg mx-auto pointer-events-auto">
     <div class="bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-2xl shadow-2xl p-3 text-slate-100 transition-all">
-        <!-- Input Bar with Search, Loading Indicator & Clear -->
-        <div class="relative flex items-center">
+        <!-- Input Bar with Search, Loading Indicator & Dedicated Cari Button -->
+        <form @submit.prevent="runQuickCheck()" class="relative flex items-center">
             <span class="absolute left-3 text-slate-400">
                 <template x-if="isScanningQuickCheck">
                     <svg class="w-4 h-4 text-blue-400 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -18,17 +18,25 @@
             </span>
             <input type="text"
                    x-model="quickCheckText"
-                   @input="runQuickCheck()"
+                   @keydown.enter.prevent="runQuickCheck()"
                    placeholder="Tempel broadcast WA banjir apa pun (cth: A Yani banjir selutut)..."
-                   class="w-full bg-slate-800/90 border border-slate-700 rounded-xl pl-9 pr-9 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-red-500 transition">
+                   class="w-full bg-slate-800/90 border border-slate-700 rounded-xl pl-9 pr-24 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-red-500 transition">
             
-            <button x-show="quickCheckText" 
-                    @click="quickCheckText = ''; quickCheckResult = null" 
-                    class="absolute right-2.5 text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-700 transition"
-                    title="Bersihkan input">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-            </button>
-        </div>
+            <div class="absolute right-1.5 flex items-center space-x-1">
+                <button type="button"
+                        x-show="quickCheckText" 
+                        @click="quickCheckText = ''; quickCheckResult = null" 
+                        class="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-700 transition"
+                        title="Bersihkan input">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+                <button type="submit"
+                        :disabled="isScanningQuickCheck || !quickCheckText.trim()"
+                        class="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-bold text-[11px] px-2.5 py-1 rounded-lg shadow transition flex items-center space-x-1 cursor-pointer">
+                    <span x-text="isScanningQuickCheck ? 'Cari...' : 'Cari'"></span>
+                </button>
+            </div>
+        </form>
 
         <!-- Sample Street Chips for Quick 1-Click Verification -->
         <div class="flex items-center space-x-1.5 mt-2 overflow-x-auto pb-1 text-[11px] scrollbar-none text-slate-400">
