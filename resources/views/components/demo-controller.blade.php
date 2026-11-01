@@ -59,6 +59,16 @@
             <span x-show="isLoading" class="animate-spin text-xs">⏳</span>
         </button>
 
+        <!-- Action 3: Teleport GPS ke Titik Banjir Terpilih -->
+        <button @click="teleportToSelected()"
+                class="w-full bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/50 text-blue-300 font-bold py-2 px-3 rounded-xl flex items-center justify-between text-left transition">
+            <div>
+                <span class="block text-xs font-semibold">📍 Posisikan GPS ke Titik Terpilih</span>
+                <span class="block text-[10px] text-blue-400/80 font-normal font-sans">Simulasi berada di lokasi (&lt;50m)</span>
+            </div>
+            <span>🎯</span>
+        </button>
+
         <!-- Toast Feedback -->
         <div x-show="toastMessage" 
              x-cloak
@@ -79,6 +89,11 @@ function demoController() {
         showToast(msg) {
             this.toastMessage = msg;
             setTimeout(() => { this.toastMessage = ''; }, 3500);
+        },
+
+        teleportToSelected() {
+            window.dispatchEvent(new CustomEvent('teleport-gps-selected'));
+            this.showToast('📍 GPS didekatkan ke titik terpilih!');
         },
 
         async fastForward() {

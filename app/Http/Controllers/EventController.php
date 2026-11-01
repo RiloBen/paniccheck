@@ -9,7 +9,23 @@ use Illuminate\Support\Facades\Auth;
 
 class EventController extends Controller
 {
-    // Fitur 1: Konfirmasi oleh warga lain
+    /**
+     * Hitung jarak Haversine antara dua koordinat desimal dalam satuan kilometer.
+     * shortcut: formula flat Haversine cocok untuk radius kota <50km, upgrade ke spatial index jika skala antar-provinsi.
+     */
+    private function calculateDistance(float $lat1, float $lon1, float $lat2, float $lon2): float
+    {
+        $earthRadius = 6371; // km
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLon = deg2rad($lon2 - $lon1);
+        $a = sin($dLat / 2) * sin($dLat / 2) +
+             cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
+             sin($dLon / 2) * sin($dLon / 2);
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+        return $earthRadius * $c;
+    }
+
+    // Fitur 1: Konfirmasi oleh warga lain (M6 - Wajib GPS <= 500m)
     public function confirm(Request $request, $id)
     {
         // Keamanan: Pastikan yang melakukan konfirmasi adalah warga yang sudah login
@@ -24,12 +40,30 @@ class EventController extends Controller
 
         $userId = Auth::id();
         $ip = $request->ip();
+        $lat = $request->input('latitude');
+        $lon = $request->input('longitude');
 
         $isDevBypass = $request->boolean('dev_bypass', false)
             || ($request->query('dev') == '1')
             || (app()->environment('local', 'testing') && $request->header('X-Paniccheck-Dev') == '1');
 
         if (!$isDevBypass) {
+            // Validasi jarak geospasial <= 500 meter (PRD M6 / Bab 8.2)
+            if ($lat === null || $lon === null) {
+                return response()->json([
+                    'message' => 'Koordinat GPS wajib disertakan untuk memastikan Anda berada di lokasi kejadian (maksimal 500 meter).',
+                ], 422);
+            }
+
+            $distanceKm = $this->calculateDistance((float)$lat, (float)$lon, (float)$event->latitude, (float)$event->longitude);
+            if ($distanceKm > 0.5) {
+                $distanceMeters = round($distanceKm * 1000);
+                return response()->json([
+                    'message' => "Lokasi Anda terdeteksi berjarak {$distanceMeters} m dari titik kejadian. Konfirmasi hanya dapat dilakukan oleh warga di lapangan dalam radius maksimal 500 meter demi validitas data.",
+                    'distance_meters' => $distanceMeters,
+                ], 422);
+            }
+
             // Anti-self-confirmation & Anti-duplicate: Cek apakah user atau IP sudah pernah melapor/mengonfirmasi kejadian ini
             $alreadyVoted = Report::where('event_id', $event->id)
                 ->where(function ($q) use ($userId, $ip) {
@@ -49,13 +83,13 @@ class EventController extends Controller
             }
         }
 
-        // Simpan konfirmasi ini sebagai laporan pendukung
+        // Simpan konfirmasi ini sebagai laporan pendukung dengan koordinat riil pelapor
         Report::create([
             'event_id' => $event->id,
             'user_id' => $userId,
             'ip_address' => $ip,
-            'latitude' => $event->latitude, 
-            'longitude' => $event->longitude,
+            'latitude' => $lat ?? $event->latitude, 
+            'longitude' => $lon ?? $event->longitude,
             'category' => $event->category,
             'is_confirmation' => true,
             'description' => 'Konfirmasi silang warga: ' . $request->description,
@@ -72,7 +106,7 @@ class EventController extends Controller
         return response()->json(['message' => 'Konfirmasi berhasil ditambahkan dan status diperbarui!']);
     }
 
-    // Fitur 2: Penutupan event oleh relawan
+    // Fitur 2: Penutupan event oleh relawan (M6 - Wajib GPS <= 500m)
     public function resolve(Request $request, $id)
     {
         $user = Auth::user();
@@ -85,6 +119,31 @@ class EventController extends Controller
         $event = Event::find($id);
         if (!$event) {
             return response()->json(['message' => 'Event tidak ditemukan'], 404);
+        }
+
+        $lat = $request->input('latitude');
+        $lon = $request->input('longitude');
+
+        $isDevBypass = $request->boolean('dev_bypass', false)
+            || ($request->query('dev') == '1')
+            || (app()->environment('local', 'testing') && $request->header('X-Paniccheck-Dev') == '1');
+
+        if (!$isDevBypass) {
+            // Validasi koordinat GPS relawan di lapangan (PRD Bab 5 & Bab 8.4)
+            if ($lat === null || $lon === null) {
+                return response()->json([
+                    'message' => 'Koordinat GPS relawan di lokasi kejadian wajib disertakan untuk penutupan bencana (PRD Bab 5).',
+                ], 422);
+            }
+
+            $distanceKm = $this->calculateDistance((float)$lat, (float)$lon, (float)$event->latitude, (float)$event->longitude);
+            if ($distanceKm > 0.5) {
+                $distanceMeters = round($distanceKm * 1000);
+                return response()->json([
+                    'message' => "Lokasi Anda terdeteksi berjarak {$distanceMeters} m dari titik kejadian. Penutupan status bencana wajib diverifikasi langsung di lapangan dalam radius maksimal 500 meter.",
+                    'distance_meters' => $distanceMeters,
+                ], 422);
+            }
         }
 
         // Kunci status menjadi surut/selesai

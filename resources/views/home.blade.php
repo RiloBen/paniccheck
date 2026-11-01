@@ -86,6 +86,21 @@ function paniccheckApp() {
             this.trackUserLocation();
             this.fetchEvents();
             window.addEventListener('reload-events', () => this.fetchEvents());
+            window.addEventListener('teleport-gps-selected', () => {
+                if (this.selectedEvent) {
+                    this.userCoords = {
+                        latitude: parseFloat((parseFloat(this.selectedEvent.latitude) + 0.0001).toFixed(6)),
+                        longitude: parseFloat((parseFloat(this.selectedEvent.longitude) + 0.0001).toFixed(6))
+                    };
+                    this.showToast('📍 GPS disimulasikan berada di lokasi kejadian (~15m)!', 'success');
+                } else {
+                    this.showToast('Pilih salah satu titik banjir di peta terlebih dahulu.', 'warning');
+                }
+            });
+        },
+
+        isDevMode() {
+            return new URLSearchParams(window.location.search).get('dev') === '1';
         },
 
         trackUserLocation() {
@@ -335,6 +350,18 @@ function paniccheckApp() {
                 return;
             }
 
+            const isDev = this.isDevMode();
+
+            // Cek jarak spasial <= 500 meter (PRD M6 / Bab 8.2)
+            if (this.selectedEvent && !isDev) {
+                const dist = this.getDistanceToEvent(this.selectedEvent);
+                if (dist !== null && dist > 500) {
+                    const distStr = dist >= 1000 ? (dist / 1000).toFixed(1) + ' km' : dist + ' m';
+                    this.showToast(`Anda terdeteksi berjarak ${distStr} dari titik kejadian. Konfirmasi hanya diizinkan dalam radius 500 meter.`, 'warning');
+                    return;
+                }
+            }
+
             this.isConfirming = true;
             try {
                 let token = await this.getSanctumToken('user');
@@ -343,11 +370,23 @@ function paniccheckApp() {
                     'Content-Type': 'application/json',
                 };
                 if (token) headers['Authorization'] = 'Bearer ' + token;
+                if (isDev) headers['X-Paniccheck-Dev'] = '1';
 
-                let res = await fetch('/api/events/' + eventId + '/confirm', {
+                // Koordinat pengirim
+                let lat = this.userCoords ? this.userCoords.latitude : (this.selectedEvent ? this.selectedEvent.latitude : null);
+                let lon = this.userCoords ? this.userCoords.longitude : (this.selectedEvent ? this.selectedEvent.longitude : null);
+
+                let payload = {
+                    latitude: lat,
+                    longitude: lon,
+                    description: 'Kondisi air masih tinggi di lapangan (konfirmasi warga).'
+                };
+                if (isDev) payload.dev_bypass = true;
+
+                let res = await fetch('/api/events/' + eventId + '/confirm' + (isDev ? '?dev=1' : ''), {
                     method: 'POST',
                     headers: headers,
-                    body: JSON.stringify({ description: 'Kondisi air masih tinggi di lapangan (konfirmasi warga).' })
+                    body: JSON.stringify(payload)
                 });
 
                 // Jika token kadaluarsa (misal sehabis reset database), bersihkan cache dan coba ulang sekali
@@ -355,10 +394,10 @@ function paniccheckApp() {
                     localStorage.removeItem('paniccheck_token_user');
                     token = await this.getSanctumToken('user');
                     if (token) headers['Authorization'] = 'Bearer ' + token;
-                    res = await fetch('/api/events/' + eventId + '/confirm', {
+                    res = await fetch('/api/events/' + eventId + '/confirm' + (isDev ? '?dev=1' : ''), {
                         method: 'POST',
                         headers: headers,
-                        body: JSON.stringify({ description: 'Kondisi air masih tinggi di lapangan (konfirmasi warga).' })
+                        body: JSON.stringify(payload)
                     });
                 }
 
@@ -382,8 +421,10 @@ function paniccheckApp() {
                     }
                 } else {
                     if (res.status === 422) {
-                        this.markConfirmed(eventId);
-                        this.showToast(data.message || 'Anda sudah memberikan laporan awal atau konfirmasi untuk kejadian ini.', 'warning');
+                        if (data.message && data.message.includes('sudah memberikan')) {
+                            this.markConfirmed(eventId);
+                        }
+                        this.showToast(data.message || 'Konfirmasi tidak memenuhi syarat.', 'warning');
                     } else {
                         this.showToast(data.message || 'Gagal mengirim konfirmasi.', 'error');
                     }
@@ -397,29 +438,50 @@ function paniccheckApp() {
         },
 
         async resolveFlood(eventId) {
-            const isDevMode = new URLSearchParams(window.location.search).get('dev') === '1';
+            const isDev = this.isDevMode();
             const cachedRelawanToken = localStorage.getItem('paniccheck_token_relawan');
             const cachedAdminToken = localStorage.getItem('paniccheck_token_admin');
             const hasPrivilegedSession = !!(cachedRelawanToken || cachedAdminToken);
 
-            if (!hasPrivilegedSession && !isDevMode) {
+            if (!hasPrivilegedSession && !isDev) {
                 alert('Akses Ditolak: Penutupan resmi status bencana ("Tandai Surut") hanya dapat dilakukan oleh Relawan Terverifikasi atau Admin Lapangan demi mencegah hoaks.\n\nSilakan login dengan akun relawan atau buka dengan mode dev.');
                 return;
+            }
+
+            // Cek jarak spasial <= 500m untuk verifikasi lapangan relawan (PRD Bab 5 & 8.4)
+            if (this.selectedEvent && !isDev) {
+                const dist = this.getDistanceToEvent(this.selectedEvent);
+                if (dist !== null && dist > 500) {
+                    const distStr = dist >= 1000 ? (dist / 1000).toFixed(1) + ' km' : dist + ' m';
+                    this.showToast(`Verifikasi lapangan relawan wajib berada dalam radius 500m (Jarak Anda: ${distStr}).`, 'warning');
+                    return;
+                }
             }
 
             if (!confirm('Konfirmasi Penutupan: Anda menyatakan genangan air di titik ini sudah surut total?')) return;
             this.isResolving = true;
             try {
-                const token = cachedRelawanToken || cachedAdminToken || (isDevMode ? await this.getSanctumToken('relawan') : null);
+                const token = cachedRelawanToken || cachedAdminToken || (isDev ? await this.getSanctumToken('relawan') : null);
                 const headers = {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
                 };
                 if (token) headers['Authorization'] = 'Bearer ' + token;
+                if (isDev) headers['X-Paniccheck-Dev'] = '1';
 
-                const res = await fetch('/api/events/' + eventId + '/resolve', {
+                let lat = this.userCoords ? this.userCoords.latitude : (this.selectedEvent ? this.selectedEvent.latitude : null);
+                let lon = this.userCoords ? this.userCoords.longitude : (this.selectedEvent ? this.selectedEvent.longitude : null);
+
+                let payload = {
+                    latitude: lat,
+                    longitude: lon
+                };
+                if (isDev) payload.dev_bypass = true;
+
+                const res = await fetch('/api/events/' + eventId + '/resolve' + (isDev ? '?dev=1' : ''), {
                     method: 'POST',
-                    headers: headers
+                    headers: headers,
+                    body: JSON.stringify(payload)
                 });
 
                 const data = await res.json().catch(() => ({}));
@@ -430,10 +492,10 @@ function paniccheckApp() {
                         this.renderMarkers();
                     }
                 } else {
-                    this.showToast(data.message || 'Akses ditolak. Hanya relawan/admin yang dapat menutup.', 'error');
+                    this.showToast(data.message || 'Akses ditolak atau posisi di luar radius 500m.', 'error');
                 }
             } catch (err) {
-                if (isDevMode) {
+                if (isDev) {
                     this.showToast('✓ Ditandai surut (RESOLVED)', 'success');
                     if (this.selectedEvent) {
                         this.selectedEvent.status = 'RESOLVED';

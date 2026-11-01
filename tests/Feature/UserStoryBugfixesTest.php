@@ -141,6 +141,8 @@ class UserStoryBugfixesTest extends TestCase
         // Coba lakukan konfirmasi silang atas event miliknya sendiri
         $response = $this->actingAs($citizen, 'sanctum')
             ->postJson("/api/events/{$event->id}/confirm", [
+                'latitude' => -7.2892,
+                'longitude' => 112.7153,
                 'description' => 'Konfirmasi silang palsu sendiri',
             ]);
 
@@ -172,6 +174,8 @@ class UserStoryBugfixesTest extends TestCase
         // Konfirmasi pertama sukses
         $res1 = $this->actingAs($citizen, 'sanctum')
             ->postJson("/api/events/{$event->id}/confirm", [
+                'latitude' => -7.2892,
+                'longitude' => 112.7153,
                 'description' => 'Air masih tinggi',
             ]);
         $res1->assertStatus(200);
@@ -179,6 +183,8 @@ class UserStoryBugfixesTest extends TestCase
         // Konfirmasi kedua dari user yang sama ditolak
         $res2 = $this->actingAs($citizen, 'sanctum')
             ->postJson("/api/events/{$event->id}/confirm", [
+                'latitude' => -7.2892,
+                'longitude' => 112.7153,
                 'description' => 'Mencoba vote lagi',
             ]);
         $res2->assertStatus(422);
