@@ -17,7 +17,7 @@
 
 1. **Alur Pelaporan Kilat Bebas Hambatan (The Panic Delusion Solver)**:
    - Form lapor darurat instan langsung dari layar utama tanpa sekat login.
-   - Pindai teks broadcast WhatsApp/grup keluarga (Quick Check) dengan ekstraksi entitas lokasi instan.
+   - Pindai teks broadcast WhatsApp/grup keluarga (Quick Check) dengan ekstraksi entitas lokasi, ketinggian air, dan tombol 1-klik plot ke peta berbasis *Rule-Based NLP & Kamus Spasial Surabaya*.
 2. **Agregasi & Validasi Geospasial $\le 500\text{ m}$ (Anti-Abuse)**:
    - Laporan dalam radius $<500\text{ m}$ otomatis digabung ke dalam satu titik bencana (*event cluster*).
    - Validasi formula Haversine untuk konfirmasi silang *"Masih Banjir"* dan penutupan kejadian oleh relawan wajib berada dalam radius maksimal 500 meter.
@@ -37,7 +37,7 @@
 
 - **Backend**: Laravel 12 / 13 (PHP 8.3), Laravel Sanctum (SPA Authentication), SQLite (Testing/Self-contained) & MySQL.
 - **Frontend**: Laravel Blade, Tailwind CSS (Mobile-First Emergency Contrast), Alpine.js (Reactive SPA State Management), Leaflet.js (Peta Spasial Interaktif).
-- **Pengujian Otomatis**: PHPUnit 12 (55 Feature Tests, 251 Assertions — 100% Passed).
+- **Pengujian Otomatis**: PHPUnit 12 (59 Feature Tests, 265 Assertions — 100% Passed).
 - **Infrastruktur / Deployment**: Dockerfile, Nixpacks, Railway / Render Cloud Ready.
 
 ---
@@ -48,8 +48,7 @@ Sesuai dengan ketentuan integritas akademik dan kompetisi **INCEPTION 2026** (PR
 
 | Komponen / Ranah | Kakas / Model AI | Peran & Ruang Lingkup Pemanfaatan | Validasi Manusia & Mitigasi Risiko |
 | :--- | :--- | :--- | :--- |
-| **Pair Programming & Code Assistant** | **Google Antigravity (Gemini 3.8 Flash & Gemini 2.5 Pro)** | Membantu penyusunan kerangka arsitektur, generasi pengujian otomatis (*automated unit/feature tests*), perumusan formula matematika Haversine geospasial, serta refactoring Alpine.js SPA state management. | **100% Manual Review**: Seluruh kode, logika bisnis, dan skema basis data diuji secara kritis, divalidasi dengan 55 automated tests, dan ditinjau langsung oleh tim pengembang. |
-| **Ekstraksi Teks Quick Check** | **Large Language Model (LLM) API** | Ekstraksi entitas nama jalan, kelurahan, dan indikasi banjir dari teks mentah broadcast WhatsApp warga. | **Fallback Lokal 0-Milidetik**: Disediakan parser Regex PHP lokal di sisi server jika API mengalami latensi atau gangguan saat demo juri. |
+| **Pair Programming & Code Assistant** | **Google Antigravity (Gemini 3.8 Flash & Gemini 2.5 Pro)** | Membantu penyusunan kerangka arsitektur, generasi pengujian otomatis (*automated unit/feature tests*), perumusan formula matematika Haversine geospasial, penulisan parser regex spasial Surabaya, serta refactoring Alpine.js SPA state management. | **100% Manual Review**: Seluruh kode, logika bisnis, dan skema basis data diuji secara kritis, divalidasi dengan 59 automated tests, dan ditinjau langsung oleh tim pengembang. |
 | **Data Sintetis Pengujian** | **Gemini & FakerPHP** | Membantu pembuatan skenario seeder banjir Surabaya yang realistis untuk keperluan gladi bersih demonstrasi 7 menit. | Seluruh koordinat spasial diverifikasi agar tepat mencerminkan titik-titik rawan banjir historis Surabaya (Mayjen Sungkono, Raya Darmo, Dharmawangsa, Ketintang, Wiyung). |
 
 ---
@@ -122,7 +121,7 @@ Akses aplikasi melalui peramban web di: `http://localhost:8000`
 ```bash
 php artisan test
 ```
-*Hasil pengujian saat ini: 55 passed, 251 assertions (100% Green).*
+*Hasil pengujian saat ini: 59 passed, 265 assertions (100% Green).*
 
 ---
 
