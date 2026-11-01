@@ -121,6 +121,8 @@ class EventApiTest extends TestCase
 
         $response = $this->actingAs($citizen, 'sanctum')
             ->postJson("/api/events/{$event->id}/confirm", [
+                'latitude' => -7.2892,
+                'longitude' => 112.7153,
                 'description' => 'Kondisi air masih selutut, belum bisa dilewati mobil sedan.',
             ]);
 
@@ -159,6 +161,8 @@ class EventApiTest extends TestCase
 
         $response = $this->actingAs($citizen, 'sanctum')
             ->postJson("/api/events/{$staleEvent->id}/confirm", [
+                'latitude' => -7.2858,
+                'longitude' => 112.7383,
                 'description' => 'Hujan deras lagi, air naik lagi semata kaki.',
             ]);
 
@@ -219,7 +223,10 @@ class EventApiTest extends TestCase
         ]);
 
         $response = $this->actingAs($volunteer, 'sanctum')
-            ->postJson("/api/events/{$event->id}/resolve");
+            ->postJson("/api/events/{$event->id}/resolve", [
+                'latitude' => -7.2892,
+                'longitude' => 112.7153,
+            ]);
 
         $response->assertStatus(200)
             ->assertJson(['message' => 'Event berhasil ditutup dan ditandai RESOLVED.']);
@@ -282,6 +289,8 @@ class EventApiTest extends TestCase
 
         $confirmRes = $this->actingAs($user, 'sanctum')
             ->postJson("/api/events/{$oldEvent->id}/confirm", [
+                'latitude' => $oldEvent->latitude,
+                'longitude' => $oldEvent->longitude,
                 'description' => 'Air masih menggenang tinggi',
             ]);
         $confirmRes->assertStatus(200);
@@ -293,6 +302,168 @@ class EventApiTest extends TestCase
         $eventDataAfter = collect($responseAfterConfirm->json('data'))->firstWhere('id', $oldEvent->id);
         $this->assertEquals('ACTIVE', $eventDataAfter['status']);
         $this->assertEquals('ACTIVE', $oldEvent->fresh()->status);
+    }
+
+    /**
+     * Uji validasi geospasial (PRD M6 / Bab 8.2):
+     * Konfirmasi dalam radius <= 500m dari titik banjir DITERIMA (HTTP 200).
+     */
+    public function test_confirm_flood_within_500m_is_accepted(): void
+    {
+        $citizen = User::create([
+            'name' => 'Warga Dekat',
+            'email' => 'warga_dekat@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'user',
+        ]);
+
+        $event = Event::create([
+            'category' => 'Banjir',
+            'latitude' => -7.289200,
+            'longitude' => 112.715300,
+            'status' => 'ACTIVE',
+        ]);
+
+        // Lokasi warga selisih ~40 meter
+        $response = $this->actingAs($citizen, 'sanctum')
+            ->postJson("/api/events/{$event->id}/confirm", [
+                'latitude' => -7.289500,
+                'longitude' => 112.715500,
+                'description' => 'Saya di perempatan dekat lampu merah, air memang masih tinggi.',
+            ]);
+
+        $response->assertStatus(200)
+            ->assertJson(['message' => 'Konfirmasi berhasil ditambahkan dan status diperbarui!']);
+
+        $report = Report::where('event_id', $event->id)->where('is_confirmation', true)->first();
+        $this->assertNotNull($report);
+        $this->assertEquals(-7.289500, (float)$report->latitude);
+    }
+
+    /**
+     * Uji validasi geospasial (PRD M6 / Bab 8.2):
+     * Konfirmasi di luar radius > 500m dari titik banjir DITOLAK (HTTP 422).
+     */
+    public function test_confirm_flood_outside_500m_is_rejected(): void
+    {
+        $citizen = User::create([
+            'name' => 'Warga Jauh',
+            'email' => 'warga_jauh@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'user',
+        ]);
+
+        $event = Event::create([
+            'category' => 'Banjir',
+            'latitude' => -7.289200,
+            'longitude' => 112.715300,
+            'status' => 'ACTIVE',
+        ]);
+
+        // Lokasi warga berjarak ~2.1 km
+        $response = $this->actingAs($citizen, 'sanctum')
+            ->postJson("/api/events/{$event->id}/confirm", [
+                'latitude' => -7.275000,
+                'longitude' => 112.730000,
+                'description' => 'Coba konfirmasi dari jarak jauh',
+            ]);
+
+        $response->assertStatus(422)
+            ->assertJsonStructure(['message', 'distance_meters']);
+
+        $this->assertStringContainsString('500 meter', $response->json('message'));
+        $this->assertGreaterThan(500, $response->json('distance_meters'));
+    }
+
+    /**
+     * Uji konfirmasi tanpa koordinat GPS ditolak (HTTP 422).
+     */
+    public function test_confirm_flood_without_gps_is_rejected(): void
+    {
+        $citizen = User::create([
+            'name' => 'Warga Tanpa GPS',
+            'email' => 'no_gps@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'user',
+        ]);
+
+        $event = Event::create([
+            'category' => 'Banjir',
+            'latitude' => -7.289200,
+            'longitude' => 112.715300,
+            'status' => 'ACTIVE',
+        ]);
+
+        $response = $this->actingAs($citizen, 'sanctum')
+            ->postJson("/api/events/{$event->id}/confirm", [
+                'description' => 'Lapor tanpa kirim GPS',
+            ]);
+
+        $response->assertStatus(422)
+            ->assertJson([
+                'message' => 'Koordinat GPS wajib disertakan untuk memastikan Anda berada di lokasi kejadian (maksimal 500 meter).',
+            ]);
+    }
+
+    /**
+     * Uji penutupan oleh relawan di luar radius 500m ditolak (PRD Bab 5 & Bab 8.4).
+     */
+    public function test_volunteer_resolve_outside_500m_is_rejected(): void
+    {
+        $volunteer = User::create([
+            'name' => 'Relawan Posko Jauh',
+            'email' => 'relawan_jauh@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'relawan',
+        ]);
+
+        $event = Event::create([
+            'category' => 'Banjir',
+            'latitude' => -7.289200,
+            'longitude' => 112.715300,
+            'status' => 'ACTIVE',
+        ]);
+
+        // Jarak ~2 km
+        $response = $this->actingAs($volunteer, 'sanctum')
+            ->postJson("/api/events/{$event->id}/resolve", [
+                'latitude' => -7.270000,
+                'longitude' => 112.730000,
+            ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('500 meter', $response->json('message'));
+        $this->assertEquals('ACTIVE', $event->fresh()->status);
+    }
+
+    /**
+     * Uji bypass simulasi Dev Mode (?dev=1 / X-Paniccheck-Dev) mengizinkan aksi remote saat demo.
+     */
+    public function test_dev_mode_bypass_allows_remote_actions_for_presentation(): void
+    {
+        $volunteer = User::create([
+            'name' => 'Relawan Demo',
+            'email' => 'relawan_demo@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'relawan',
+        ]);
+
+        $event = Event::create([
+            'category' => 'Banjir',
+            'latitude' => -7.289200,
+            'longitude' => 112.715300,
+            'status' => 'ACTIVE',
+        ]);
+
+        // Relawan berada jauh tapi mengirimkan dev_bypass / header demo
+        $response = $this->actingAs($volunteer, 'sanctum')
+            ->withHeader('X-Paniccheck-Dev', '1')
+            ->postJson("/api/events/{$event->id}/resolve", [
+                'dev_bypass' => true,
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('RESOLVED', $event->fresh()->status);
     }
 }
 

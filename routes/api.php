@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\EventController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\DemoController;
 use App\Http\Controllers\QuickCheckController;  
 use App\Http\Middleware\RoleMiddleware;
 
@@ -38,10 +39,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Fitur KHUSUS Relawan & Admin (Dilindungi Satpam RoleMiddleware)
     Route::middleware([RoleMiddleware::class . ':relawan,admin'])->group(function () {
-        
-        // Relawan login melakukan konfirmasi silang/surut (M6)
-        Route::post('/events/{id}/confirm', [EventController::class, 'confirm']);
-        
         // (Kamu bisa menambahkan rute khusus relawan lainnya di dalam grup ini nanti)
     });
 });
+
+// Rute simulator demo juri & dev mode (M7 - Proteksi di level Controller: Admin / Dev Mode)
+Route::post('/demo/fast-forward', [DemoController::class, 'fastForward']);
+Route::post('/demo/reset', [DemoController::class, 'reset']);

@@ -72,6 +72,8 @@ function paniccheckApp() {
         reportError: null,
         userCoords: { latitude: -7.2819, longitude: 112.7483 }, // Default Surabaya
         isDetectingUserCoords: false,
+        userRole: localStorage.getItem('user_role') || 'guest',
+        isLoggedIn: !!localStorage.getItem('access_token'),
 
         form: {
             latitude: -7.2892,
@@ -81,11 +83,39 @@ function paniccheckApp() {
             description: ''
         },
 
+        syncAuth() {
+            this.userRole = localStorage.getItem('user_role') || 'guest';
+            this.isLoggedIn = !!localStorage.getItem('access_token');
+        },
+
         init() {
+            this.syncAuth();
+            window.addEventListener('auth-changed', (e) => {
+                this.syncAuth();
+                this.renderMarkers();
+            });
+            window.addEventListener('resolve-event', (e) => {
+                this.resolveFlood(e.detail);
+            });
             this.initMap();
             this.trackUserLocation();
             this.fetchEvents();
             window.addEventListener('reload-events', () => this.fetchEvents());
+            window.addEventListener('teleport-gps-selected', () => {
+                if (this.selectedEvent) {
+                    this.userCoords = {
+                        latitude: parseFloat((parseFloat(this.selectedEvent.latitude) + 0.0001).toFixed(6)),
+                        longitude: parseFloat((parseFloat(this.selectedEvent.longitude) + 0.0001).toFixed(6))
+                    };
+                    this.showToast('📍 GPS disimulasikan berada di lokasi kejadian (~15m)!', 'success');
+                } else {
+                    this.showToast('Pilih salah satu titik banjir di peta terlebih dahulu.', 'warning');
+                }
+            });
+        },
+
+        isDevMode() {
+            return new URLSearchParams(window.location.search).get('dev') === '1';
         },
 
         trackUserLocation() {
@@ -335,55 +365,101 @@ function paniccheckApp() {
                 return;
             }
 
+            const isDev = this.isDevMode();
+
+            // Cek jarak spasial <= 500 meter (PRD M6 / Bab 8.2)
+            if (this.selectedEvent && !isDev) {
+                const dist = this.getDistanceToEvent(this.selectedEvent);
+                if (dist !== null && dist > 500) {
+                    const distStr = dist >= 1000 ? (dist / 1000).toFixed(1) + ' km' : dist + ' m';
+                    this.showToast(`Anda terdeteksi berjarak ${distStr} dari titik kejadian. Konfirmasi hanya diizinkan dalam radius 500 meter.`, 'warning');
+                    return;
+                }
+            }
+
             this.isConfirming = true;
             try {
-                let token = await this.getSanctumToken('user');
+                let token = localStorage.getItem('access_token');
+                if (!token && isDev) {
+                    token = await this.getSanctumToken('user');
+                }
+                if (!token && !isDev) {
+                    this.showToast('Silakan masuk terlebih dahulu untuk mengonfirmasi status banjir.', 'warning');
+                    window.dispatchEvent(new CustomEvent('open-login-modal'));
+                    this.isConfirming = false;
+                    return;
+                }
+
                 let headers = {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
                 };
                 if (token) headers['Authorization'] = 'Bearer ' + token;
+                if (isDev) headers['X-Paniccheck-Dev'] = '1';
 
-                let res = await fetch('/api/events/' + eventId + '/confirm', {
+                // Koordinat pengirim
+                let lat = this.userCoords ? this.userCoords.latitude : (this.selectedEvent ? this.selectedEvent.latitude : null);
+                let lon = this.userCoords ? this.userCoords.longitude : (this.selectedEvent ? this.selectedEvent.longitude : null);
+
+                let payload = {
+                    latitude: lat,
+                    longitude: lon,
+                    description: 'Kondisi air masih tinggi di lapangan (konfirmasi warga).'
+                };
+                if (isDev) payload.dev_bypass = true;
+
+                let res = await fetch('/api/events/' + eventId + '/confirm' + (isDev ? '?dev=1' : ''), {
                     method: 'POST',
                     headers: headers,
-                    body: JSON.stringify({ description: 'Kondisi air masih tinggi di lapangan (konfirmasi warga).' })
+                    body: JSON.stringify(payload)
                 });
 
-                // Jika token kadaluarsa (misal sehabis reset database), bersihkan cache dan coba ulang sekali
-                if (res.status === 401) {
-                    localStorage.removeItem('paniccheck_token_user');
-                    token = await this.getSanctumToken('user');
-                    if (token) headers['Authorization'] = 'Bearer ' + token;
-                    res = await fetch('/api/events/' + eventId + '/confirm', {
-                        method: 'POST',
-                        headers: headers,
-                        body: JSON.stringify({ description: 'Kondisi air masih tinggi di lapangan (konfirmasi warga).' })
-                    });
+                if (res.status === 401 || res.status === 403) {
+                    const errData = await res.json().catch(() => ({}));
+                    window.dispatchEvent(new CustomEvent('auth-error', { detail: { status: res.status, message: errData.message } }));
+                    return;
                 }
 
                 const data = await res.json().catch(() => ({}));
                 if (res.ok) {
                     this.markConfirmed(eventId);
                     this.showToast('✓ Konfirmasi berhasil ditambahkan! Status diperbarui.', 'success');
-                    if (this.selectedEvent && this.selectedEvent.id === eventId) {
-                        this.selectedEvent.reports_count = (this.selectedEvent.reports_count || 1) + 1;
-                        this.selectedEvent.status = 'ACTIVE';
-                        this.selectedEvent.is_verified = true;
-                        if (!this.selectedEvent.reports) this.selectedEvent.reports = [];
-                        this.selectedEvent.reports.unshift({
+                    const target = this.events.find(e => e.id == eventId);
+                    if (target) {
+                        target.reports_count = (target.reports_count || 1) + 1;
+                        target.status = 'ACTIVE';
+                        target.is_verified = true;
+                        if (!target.reports) target.reports = [];
+                        target.reports.unshift({
                             id: Date.now(),
                             is_confirmation: true,
-                            water_level: this.selectedEvent.water_level,
+                            water_level: target.water_level,
                             description: 'Konfirmasi silang warga: Kondisi air masih tinggi di lapangan.',
                             created_at: new Date().toISOString()
                         });
-                        this.renderMarkers();
                     }
+                    if (this.selectedEvent && this.selectedEvent.id == eventId) {
+                        if (this.selectedEvent !== target) {
+                            this.selectedEvent.reports_count = (this.selectedEvent.reports_count || 1) + 1;
+                            this.selectedEvent.status = 'ACTIVE';
+                            this.selectedEvent.is_verified = true;
+                            if (!this.selectedEvent.reports) this.selectedEvent.reports = [];
+                            this.selectedEvent.reports.unshift({
+                                id: Date.now(),
+                                is_confirmation: true,
+                                water_level: this.selectedEvent.water_level,
+                                description: 'Konfirmasi silang warga: Kondisi air masih tinggi di lapangan.',
+                                created_at: new Date().toISOString()
+                            });
+                        }
+                    }
+                    this.renderMarkers();
                 } else {
                     if (res.status === 422) {
-                        this.markConfirmed(eventId);
-                        this.showToast(data.message || 'Anda sudah memberikan laporan awal atau konfirmasi untuk kejadian ini.', 'warning');
+                        if (data.message && data.message.includes('sudah memberikan')) {
+                            this.markConfirmed(eventId);
+                        }
+                        this.showToast(data.message || 'Konfirmasi tidak memenuhi syarat.', 'warning');
                     } else {
                         this.showToast(data.message || 'Gagal mengirim konfirmasi.', 'error');
                     }
@@ -397,48 +473,77 @@ function paniccheckApp() {
         },
 
         async resolveFlood(eventId) {
-            const isDevMode = new URLSearchParams(window.location.search).get('dev') === '1';
-            const cachedRelawanToken = localStorage.getItem('paniccheck_token_relawan');
-            const cachedAdminToken = localStorage.getItem('paniccheck_token_admin');
-            const hasPrivilegedSession = !!(cachedRelawanToken || cachedAdminToken);
+            const isDev = this.isDevMode();
+            const token = localStorage.getItem('access_token') || localStorage.getItem('paniccheck_token_relawan') || localStorage.getItem('paniccheck_token_admin');
+            const isRelawanOrAdmin = (this.userRole === 'relawan' || this.userRole === 'admin');
 
-            if (!hasPrivilegedSession && !isDevMode) {
-                alert('Akses Ditolak: Penutupan resmi status bencana ("Tandai Surut") hanya dapat dilakukan oleh Relawan Terverifikasi atau Admin Lapangan demi mencegah hoaks.\n\nSilakan login dengan akun relawan atau buka dengan mode dev.');
+            if (!isRelawanOrAdmin && !isDev) {
+                this.showToast('Akses Ditolak: Fitur ini khusus untuk Relawan / Admin.', 'error');
                 return;
+            }
+
+            // Cek jarak spasial <= 500m untuk verifikasi lapangan relawan (PRD Bab 5 & 8.4)
+            if (this.selectedEvent && !isDev) {
+                const dist = this.getDistanceToEvent(this.selectedEvent);
+                if (dist !== null && dist > 500) {
+                    const distStr = dist >= 1000 ? (dist / 1000).toFixed(1) + ' km' : dist + ' m';
+                    this.showToast(`Verifikasi lapangan relawan wajib berada dalam radius 500m (Jarak Anda: ${distStr}).`, 'warning');
+                    return;
+                }
             }
 
             if (!confirm('Konfirmasi Penutupan: Anda menyatakan genangan air di titik ini sudah surut total?')) return;
             this.isResolving = true;
             try {
-                const token = cachedRelawanToken || cachedAdminToken || (isDevMode ? await this.getSanctumToken('relawan') : null);
                 const headers = {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
                 };
                 if (token) headers['Authorization'] = 'Bearer ' + token;
+                if (isDev) headers['X-Paniccheck-Dev'] = '1';
 
-                const res = await fetch('/api/events/' + eventId + '/resolve', {
+                let lat = this.userCoords ? this.userCoords.latitude : (this.selectedEvent ? this.selectedEvent.latitude : null);
+                let lon = this.userCoords ? this.userCoords.longitude : (this.selectedEvent ? this.selectedEvent.longitude : null);
+
+                let payload = {
+                    latitude: lat,
+                    longitude: lon
+                };
+                if (isDev) payload.dev_bypass = true;
+
+                const res = await fetch('/api/events/' + eventId + '/resolve' + (isDev ? '?dev=1' : ''), {
                     method: 'POST',
-                    headers: headers
+                    headers: headers,
+                    body: JSON.stringify(payload)
                 });
 
                 const data = await res.json().catch(() => ({}));
                 if (res.ok) {
                     this.showToast('✓ Kejadian banjir resmi ditutup & status berubah RESOLVED!', 'success');
-                    if (this.selectedEvent && this.selectedEvent.id === eventId) {
-                        this.selectedEvent.status = 'RESOLVED';
-                        this.renderMarkers();
+                    const target = this.events.find(e => e.id == eventId);
+                    if (target) {
+                        target.status = 'RESOLVED';
                     }
+                    if (this.selectedEvent && this.selectedEvent.id == eventId) {
+                        this.selectedEvent.status = 'RESOLVED';
+                    }
+                    this.renderMarkers();
                 } else {
-                    this.showToast(data.message || 'Akses ditolak. Hanya relawan/admin yang dapat menutup.', 'error');
+                    if (res.status === 401 || res.status === 403) {
+                        window.dispatchEvent(new CustomEvent('auth-error', { detail: { status: res.status, message: data.message } }));
+                    } else {
+                        this.showToast(data.message || 'Akses ditolak atau posisi di luar radius 500m.', 'error');
+                    }
                 }
             } catch (err) {
-                if (isDevMode) {
+                if (isDev) {
                     this.showToast('✓ Ditandai surut (RESOLVED)', 'success');
-                    if (this.selectedEvent) {
+                    const target = this.events.find(e => e.id == eventId);
+                    if (target) target.status = 'RESOLVED';
+                    if (this.selectedEvent && this.selectedEvent.id == eventId) {
                         this.selectedEvent.status = 'RESOLVED';
-                        this.renderMarkers();
                     }
+                    this.renderMarkers();
                 } else {
                     this.showToast('Gagal memproses penutupan status.', 'error');
                 }
@@ -513,6 +618,8 @@ function paniccheckApp() {
                 return e.status === this.currentFilter;
             });
 
+            const isRelawanOrAdmin = (this.userRole === 'relawan' || this.userRole === 'admin');
+
             filtered.forEach(ev => {
                 const markerIcon = this.createMarkerIcon(ev);
                 const marker = L.marker([ev.latitude, ev.longitude], { icon: markerIcon });
@@ -521,6 +628,28 @@ function paniccheckApp() {
                     this.selectedEvent = ev;
                     this.map.panTo([ev.latitude, ev.longitude]);
                 });
+
+                // Tooltip / Popup Leaflet sesuai PRD Frontend (Sistem Autentikasi SPA & Hak Akses)
+                let popupHtml = `
+                    <div class="p-1 text-slate-900 font-sans text-xs min-w-[180px]">
+                        <div class="font-bold text-sm mb-1 text-slate-900">${ev.location_name || 'Titik Genangan'}</div>
+                        <div class="text-[11px] text-slate-600">Status: <span class="font-bold text-slate-800">${ev.status === 'ACTIVE' ? 'Aktif' : (ev.status === 'STALE' ? 'Perlu Konfirmasi' : 'Surut')}</span></div>
+                        <div class="text-[11px] text-slate-600">Ketinggian: <span class="font-bold text-slate-800">${ev.water_level || 'Normal'}</span></div>
+                `;
+
+                // Tombol "Konfirmasi Surut / Update Status" HANYA tampil untuk Relawan / Admin (disembunyikan total dari Pengunjung Anonim & Warga Biasa)
+                if (isRelawanOrAdmin && ev.status !== 'RESOLVED') {
+                    popupHtml += `
+                        <button onclick="window.dispatchEvent(new CustomEvent('resolve-event', { detail: ${ev.id} }))" 
+                                class="mt-2.5 w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold py-1.5 px-2 rounded-lg text-xs flex items-center justify-center space-x-1 shadow transition cursor-pointer">
+                            <span>🛡️</span>
+                            <span>Konfirmasi Surut / Update Status</span>
+                        </button>
+                    `;
+                }
+
+                popupHtml += `</div>`;
+                marker.bindPopup(popupHtml);
 
                 marker.addTo(this.markersLayer);
             });
@@ -649,13 +778,16 @@ function paniccheckApp() {
 
             try {
                 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+                const token = localStorage.getItem('access_token');
+                const headers = {
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || ''
+                };
+                if (token) headers['Authorization'] = 'Bearer ' + token;
+
                 const res = await fetch('/api/reports', {
                     method: 'POST',
-                    headers: {
-                        'Accept': 'application/json',
-                        'X-CSRF-TOKEN': csrfToken || ''
-                        // Content-Type omitted: browser sets multipart boundary automatically
-                    },
+                    headers: headers,
                     body: formData
                 });
 

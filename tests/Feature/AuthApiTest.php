@@ -120,5 +120,56 @@ class AuthApiTest extends TestCase
         $response->assertStatus(401)
             ->assertJson(['message' => 'Email atau password salah']);
     }
+
+    /**
+     * Uji logout berhasil dan token dicabut (HTTP 200).
+     */
+    public function test_user_can_logout_and_revoke_token(): void
+    {
+        $user = User::factory()->create(['role' => 'user']);
+        $token = $user->createToken('auth_token')->plainTextToken;
+
+        $response = $this->withHeader('Authorization', 'Bearer ' . $token)
+            ->postJson('/api/logout');
+
+        $response->assertStatus(200)
+            ->assertJson(['message' => 'Berhasil logout, akses token telah dihancurkan.']);
+
+        $this->assertCount(0, $user->fresh()->tokens);
+    }
+
+    /**
+     * Uji warga dapat upgrade pangkat menjadi relawan (HTTP 200).
+     */
+    public function test_citizen_can_upgrade_to_relawan(): void
+    {
+        $user = User::factory()->create(['role' => 'user']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/upgrade-relawan');
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'message' => 'Selamat! Akun Anda telah ditingkatkan menjadi Relawan.',
+                'user' => ['role' => 'relawan'],
+            ]);
+
+        $this->assertEquals('relawan', $user->fresh()->role);
+    }
+
+    /**
+     * Uji relawan atau admin tidak dapat melakukan upgrade ulang (HTTP 400).
+     */
+    public function test_already_relawan_or_admin_cannot_upgrade_again(): void
+    {
+        $relawan = User::factory()->create(['role' => 'relawan']);
+
+        $response = $this->actingAs($relawan, 'sanctum')
+            ->postJson('/api/upgrade-relawan');
+
+        $response->assertStatus(400)
+            ->assertJson(['message' => 'Akun Anda sudah memiliki akses khusus.']);
+    }
 }
+
 

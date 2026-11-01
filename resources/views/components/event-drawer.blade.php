@@ -155,15 +155,39 @@
             <!-- M6: Action Buttons (Konfirmasi Warga & Penutupan Relawan) -->
             <div class="pt-2 border-t border-slate-800 space-y-2">
                 <template x-if="selectedEvent.status !== 'RESOLVED'">
-                    <div class="grid grid-cols-2 gap-2">
-                        <!-- Tombol Konfirmasi Silang Warga (Maksimal 1 Suara per Sesi/Perangkat) -->
+                    <div class="grid gap-2" :class="(userRole === 'relawan' || userRole === 'admin') ? 'grid-cols-2' : 'grid-cols-1'">
+                        <!-- Tombol Konfirmasi Silang Warga (Maksimal 1 Suara per Sesi & Validasi Jarak <= 500m PRD M6) -->
                         <template x-if="!hasConfirmed(selectedEvent.id)">
-                            <button @click="confirmFlood(selectedEvent.id)"
-                                    :disabled="isConfirming"
-                                    class="bg-amber-600 hover:bg-amber-500 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-lg shadow-amber-600/20 active:scale-95 transition disabled:opacity-50">
-                                <span>🤝</span>
-                                <span>Masih Banjir</span>
-                            </button>
+                            <div>
+                                <!-- Jika berada dalam radius <= 500m ATAU Dev Mode aktif: Tombol Aktif Normal -->
+                                <template x-if="(getDistanceToEvent(selectedEvent) !== null && getDistanceToEvent(selectedEvent) <= 500) || isDevMode()">
+                                    <button @click="confirmFlood(selectedEvent.id)"
+                                            :disabled="isConfirming"
+                                            class="w-full bg-amber-600 hover:bg-amber-500 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-lg shadow-amber-600/20 active:scale-95 transition disabled:opacity-50">
+                                        <span>🤝</span>
+                                        <span>Masih Banjir</span>
+                                    </button>
+                                </template>
+
+                                <!-- Jika berada di luar radius > 500m dan bukan Dev Mode: Tombol Terkunci Transparan -->
+                                <template x-if="getDistanceToEvent(selectedEvent) !== null && getDistanceToEvent(selectedEvent) > 500 && !isDevMode()">
+                                    <button @click="showToast('Konfirmasi lapangan hanya diizinkan untuk warga dalam radius 500m (Jarak Anda: ' + (getDistanceToEvent(selectedEvent) >= 1000 ? (getDistanceToEvent(selectedEvent)/1000).toFixed(1) + ' km' : getDistanceToEvent(selectedEvent) + ' m') + ').', 'warning')"
+                                            class="w-full bg-slate-800/90 border border-slate-700/80 text-slate-400 font-medium py-2 px-2 rounded-xl text-[11px] flex items-center justify-center space-x-1 hover:border-amber-500/50 hover:text-slate-300 transition">
+                                        <span>📍</span>
+                                        <span x-text="'Di Luar Radius (' + (getDistanceToEvent(selectedEvent) >= 1000 ? (getDistanceToEvent(selectedEvent)/1000).toFixed(1) + ' km' : getDistanceToEvent(selectedEvent) + ' m') + ')'"></span>
+                                    </button>
+                                </template>
+
+                                <!-- Jika GPS belum terdeteksi dan bukan Dev Mode -->
+                                <template x-if="getDistanceToEvent(selectedEvent) === null && !isDevMode()">
+                                    <button @click="trackUserLocation(); showToast('Mendeteksi lokasi GPS Anda...', 'info')"
+                                            :disabled="isDetectingUserCoords"
+                                            class="w-full bg-slate-800 border border-amber-500/40 text-amber-300 font-semibold py-2 px-2 rounded-xl text-[11px] flex items-center justify-center space-x-1 shadow transition">
+                                        <span>📡</span>
+                                        <span x-text="isDetectingUserCoords ? 'Mendeteksi...' : 'Cek GPS Konfirmasi'"></span>
+                                    </button>
+                                </template>
+                            </div>
                         </template>
 
                         <template x-if="hasConfirmed(selectedEvent.id)">
@@ -174,13 +198,15 @@
                             </button>
                         </template>
 
-                        <!-- Tombol Penutupan Relawan / Admin (Terproteksi Role) -->
-                        <button @click="resolveFlood(selectedEvent.id)"
-                                :disabled="isResolving"
-                                class="bg-emerald-600/90 hover:bg-emerald-500 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-lg shadow-emerald-600/20 active:scale-95 transition disabled:opacity-50">
-                            <span>🛡️</span>
-                            <span>Tandai Surut</span>
-                        </button>
+                        <!-- Tombol Penutupan Relawan / Admin (Khusus Relawan & Admin: Disembunyikan total dari Warga dan Guest) -->
+                        <template x-if="userRole === 'relawan' || userRole === 'admin'">
+                            <button @click="resolveFlood(selectedEvent.id)"
+                                    :disabled="isResolving"
+                                    class="bg-emerald-600/90 hover:bg-emerald-500 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-lg shadow-emerald-600/20 active:scale-95 transition disabled:opacity-50">
+                                <span>🛡️</span>
+                                <span>Konfirmasi Surut / Update Status</span>
+                            </button>
+                        </template>
                     </div>
                 </template>
 
