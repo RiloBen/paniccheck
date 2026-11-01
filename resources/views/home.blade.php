@@ -72,6 +72,8 @@ function paniccheckApp() {
         reportError: null,
         userCoords: { latitude: -7.2819, longitude: 112.7483 }, // Default Surabaya
         isDetectingUserCoords: false,
+        userRole: localStorage.getItem('user_role') || 'guest',
+        isLoggedIn: !!localStorage.getItem('access_token'),
 
         form: {
             latitude: -7.2892,
@@ -81,7 +83,20 @@ function paniccheckApp() {
             description: ''
         },
 
+        syncAuth() {
+            this.userRole = localStorage.getItem('user_role') || 'guest';
+            this.isLoggedIn = !!localStorage.getItem('access_token');
+        },
+
         init() {
+            this.syncAuth();
+            window.addEventListener('auth-changed', (e) => {
+                this.syncAuth();
+                this.renderMarkers();
+            });
+            window.addEventListener('resolve-event', (e) => {
+                this.resolveFlood(e.detail);
+            });
             this.initMap();
             this.trackUserLocation();
             this.fetchEvents();
@@ -364,7 +379,17 @@ function paniccheckApp() {
 
             this.isConfirming = true;
             try {
-                let token = await this.getSanctumToken('user');
+                let token = localStorage.getItem('access_token');
+                if (!token && isDev) {
+                    token = await this.getSanctumToken('user');
+                }
+                if (!token && !isDev) {
+                    this.showToast('Silakan masuk terlebih dahulu untuk mengonfirmasi status banjir.', 'warning');
+                    window.dispatchEvent(new CustomEvent('open-login-modal'));
+                    this.isConfirming = false;
+                    return;
+                }
+
                 let headers = {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
@@ -389,36 +414,46 @@ function paniccheckApp() {
                     body: JSON.stringify(payload)
                 });
 
-                // Jika token kadaluarsa (misal sehabis reset database), bersihkan cache dan coba ulang sekali
-                if (res.status === 401) {
-                    localStorage.removeItem('paniccheck_token_user');
-                    token = await this.getSanctumToken('user');
-                    if (token) headers['Authorization'] = 'Bearer ' + token;
-                    res = await fetch('/api/events/' + eventId + '/confirm' + (isDev ? '?dev=1' : ''), {
-                        method: 'POST',
-                        headers: headers,
-                        body: JSON.stringify(payload)
-                    });
+                if (res.status === 401 || res.status === 403) {
+                    const errData = await res.json().catch(() => ({}));
+                    window.dispatchEvent(new CustomEvent('auth-error', { detail: { status: res.status, message: errData.message } }));
+                    return;
                 }
 
                 const data = await res.json().catch(() => ({}));
                 if (res.ok) {
                     this.markConfirmed(eventId);
                     this.showToast('✓ Konfirmasi berhasil ditambahkan! Status diperbarui.', 'success');
-                    if (this.selectedEvent && this.selectedEvent.id === eventId) {
-                        this.selectedEvent.reports_count = (this.selectedEvent.reports_count || 1) + 1;
-                        this.selectedEvent.status = 'ACTIVE';
-                        this.selectedEvent.is_verified = true;
-                        if (!this.selectedEvent.reports) this.selectedEvent.reports = [];
-                        this.selectedEvent.reports.unshift({
+                    const target = this.events.find(e => e.id == eventId);
+                    if (target) {
+                        target.reports_count = (target.reports_count || 1) + 1;
+                        target.status = 'ACTIVE';
+                        target.is_verified = true;
+                        if (!target.reports) target.reports = [];
+                        target.reports.unshift({
                             id: Date.now(),
                             is_confirmation: true,
-                            water_level: this.selectedEvent.water_level,
+                            water_level: target.water_level,
                             description: 'Konfirmasi silang warga: Kondisi air masih tinggi di lapangan.',
                             created_at: new Date().toISOString()
                         });
-                        this.renderMarkers();
                     }
+                    if (this.selectedEvent && this.selectedEvent.id == eventId) {
+                        if (this.selectedEvent !== target) {
+                            this.selectedEvent.reports_count = (this.selectedEvent.reports_count || 1) + 1;
+                            this.selectedEvent.status = 'ACTIVE';
+                            this.selectedEvent.is_verified = true;
+                            if (!this.selectedEvent.reports) this.selectedEvent.reports = [];
+                            this.selectedEvent.reports.unshift({
+                                id: Date.now(),
+                                is_confirmation: true,
+                                water_level: this.selectedEvent.water_level,
+                                description: 'Konfirmasi silang warga: Kondisi air masih tinggi di lapangan.',
+                                created_at: new Date().toISOString()
+                            });
+                        }
+                    }
+                    this.renderMarkers();
                 } else {
                     if (res.status === 422) {
                         if (data.message && data.message.includes('sudah memberikan')) {
@@ -439,12 +474,11 @@ function paniccheckApp() {
 
         async resolveFlood(eventId) {
             const isDev = this.isDevMode();
-            const cachedRelawanToken = localStorage.getItem('paniccheck_token_relawan');
-            const cachedAdminToken = localStorage.getItem('paniccheck_token_admin');
-            const hasPrivilegedSession = !!(cachedRelawanToken || cachedAdminToken);
+            const token = localStorage.getItem('access_token') || localStorage.getItem('paniccheck_token_relawan') || localStorage.getItem('paniccheck_token_admin');
+            const isRelawanOrAdmin = (this.userRole === 'relawan' || this.userRole === 'admin');
 
-            if (!hasPrivilegedSession && !isDev) {
-                alert('Akses Ditolak: Penutupan resmi status bencana ("Tandai Surut") hanya dapat dilakukan oleh Relawan Terverifikasi atau Admin Lapangan demi mencegah hoaks.\n\nSilakan login dengan akun relawan atau buka dengan mode dev.');
+            if (!isRelawanOrAdmin && !isDev) {
+                this.showToast('Akses Ditolak: Fitur ini khusus untuk Relawan / Admin.', 'error');
                 return;
             }
 
@@ -461,7 +495,6 @@ function paniccheckApp() {
             if (!confirm('Konfirmasi Penutupan: Anda menyatakan genangan air di titik ini sudah surut total?')) return;
             this.isResolving = true;
             try {
-                const token = cachedRelawanToken || cachedAdminToken || (isDev ? await this.getSanctumToken('relawan') : null);
                 const headers = {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
@@ -487,20 +520,30 @@ function paniccheckApp() {
                 const data = await res.json().catch(() => ({}));
                 if (res.ok) {
                     this.showToast('✓ Kejadian banjir resmi ditutup & status berubah RESOLVED!', 'success');
-                    if (this.selectedEvent && this.selectedEvent.id === eventId) {
-                        this.selectedEvent.status = 'RESOLVED';
-                        this.renderMarkers();
+                    const target = this.events.find(e => e.id == eventId);
+                    if (target) {
+                        target.status = 'RESOLVED';
                     }
+                    if (this.selectedEvent && this.selectedEvent.id == eventId) {
+                        this.selectedEvent.status = 'RESOLVED';
+                    }
+                    this.renderMarkers();
                 } else {
-                    this.showToast(data.message || 'Akses ditolak atau posisi di luar radius 500m.', 'error');
+                    if (res.status === 401 || res.status === 403) {
+                        window.dispatchEvent(new CustomEvent('auth-error', { detail: { status: res.status, message: data.message } }));
+                    } else {
+                        this.showToast(data.message || 'Akses ditolak atau posisi di luar radius 500m.', 'error');
+                    }
                 }
             } catch (err) {
                 if (isDev) {
                     this.showToast('✓ Ditandai surut (RESOLVED)', 'success');
-                    if (this.selectedEvent) {
+                    const target = this.events.find(e => e.id == eventId);
+                    if (target) target.status = 'RESOLVED';
+                    if (this.selectedEvent && this.selectedEvent.id == eventId) {
                         this.selectedEvent.status = 'RESOLVED';
-                        this.renderMarkers();
                     }
+                    this.renderMarkers();
                 } else {
                     this.showToast('Gagal memproses penutupan status.', 'error');
                 }
@@ -575,6 +618,8 @@ function paniccheckApp() {
                 return e.status === this.currentFilter;
             });
 
+            const isRelawanOrAdmin = (this.userRole === 'relawan' || this.userRole === 'admin');
+
             filtered.forEach(ev => {
                 const markerIcon = this.createMarkerIcon(ev);
                 const marker = L.marker([ev.latitude, ev.longitude], { icon: markerIcon });
@@ -583,6 +628,28 @@ function paniccheckApp() {
                     this.selectedEvent = ev;
                     this.map.panTo([ev.latitude, ev.longitude]);
                 });
+
+                // Tooltip / Popup Leaflet sesuai PRD Frontend (Sistem Autentikasi SPA & Hak Akses)
+                let popupHtml = `
+                    <div class="p-1 text-slate-900 font-sans text-xs min-w-[180px]">
+                        <div class="font-bold text-sm mb-1 text-slate-900">${ev.location_name || 'Titik Genangan'}</div>
+                        <div class="text-[11px] text-slate-600">Status: <span class="font-bold text-slate-800">${ev.status === 'ACTIVE' ? 'Aktif' : (ev.status === 'STALE' ? 'Perlu Konfirmasi' : 'Surut')}</span></div>
+                        <div class="text-[11px] text-slate-600">Ketinggian: <span class="font-bold text-slate-800">${ev.water_level || 'Normal'}</span></div>
+                `;
+
+                // Tombol "Konfirmasi Surut / Update Status" HANYA tampil untuk Relawan / Admin (disembunyikan total dari Pengunjung Anonim & Warga Biasa)
+                if (isRelawanOrAdmin && ev.status !== 'RESOLVED') {
+                    popupHtml += `
+                        <button onclick="window.dispatchEvent(new CustomEvent('resolve-event', { detail: ${ev.id} }))" 
+                                class="mt-2.5 w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold py-1.5 px-2 rounded-lg text-xs flex items-center justify-center space-x-1 shadow transition cursor-pointer">
+                            <span>🛡️</span>
+                            <span>Konfirmasi Surut / Update Status</span>
+                        </button>
+                    `;
+                }
+
+                popupHtml += `</div>`;
+                marker.bindPopup(popupHtml);
 
                 marker.addTo(this.markersLayer);
             });
@@ -711,13 +778,16 @@ function paniccheckApp() {
 
             try {
                 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+                const token = localStorage.getItem('access_token');
+                const headers = {
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || ''
+                };
+                if (token) headers['Authorization'] = 'Bearer ' + token;
+
                 const res = await fetch('/api/reports', {
                     method: 'POST',
-                    headers: {
-                        'Accept': 'application/json',
-                        'X-CSRF-TOKEN': csrfToken || ''
-                        // Content-Type omitted: browser sets multipart boundary automatically
-                    },
+                    headers: headers,
                     body: formData
                 });
 

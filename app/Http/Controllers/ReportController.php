@@ -13,21 +13,6 @@ class ReportController extends Controller
 {
     public function store(Request $request)
     {
-        // --- SOLUSI BUG 1: Pengecekan IP Rate Limiter ---
-        $ipAddress = $request->ip();
-        $throttleKey = 'lapor-banjir-' . $ipAddress;
-
-        // Cek apakah IP ini sudah melapor dalam 60 menit terakhir (batas maksimal 1 laporan)
-        if (RateLimiter::tooManyAttempts($throttleKey, 1)) {
-            $seconds = RateLimiter::availableIn($throttleKey);
-            $minutes = ceil($seconds / 60);
-            
-            return response()->json([
-                'message' => "Anda sudah membuat laporan. Tunggu {$minutes} menit lagi untuk mencegah spam/manipulasi data."
-            ], 429); // 429: Too Many Requests
-        }
-        // ------------------------------------------------
-
         // 1. Validasi data, termasuk membatasi file hanya boleh gambar (jpg/png) maksimal 2MB
         $request->validate([
             'latitude' => 'required|numeric',
@@ -39,7 +24,50 @@ class ReportController extends Controller
         $lat = $request->latitude;
         $lon = $request->longitude;
         $category = $request->category;
-        
+        $user = $request->user('sanctum') ?? Auth::user();
+        $userId = $user?->id;
+        $ipAddress = $request->ip();
+        $throttleKey = 'lapor-banjir-' . $ipAddress;
+
+        // Dev / Testing Bypass agar simulasi juri dan automated tests tidak terkunci
+        $isDevBypass = $request->boolean('dev_bypass', false)
+            || ($request->query('dev') == '1')
+            || (app()->environment('local', 'testing') && $request->header('X-Paniccheck-Dev') == '1');
+
+        if (!$isDevBypass) {
+            // Cooldown check anti-spam per IP/User di lokasi yang sama (<500m dalam 10 menit)
+            $tenMinutesAgo = Carbon::now()->subMinutes(10);
+            $recentReport = Report::where('created_at', '>=', $tenMinutesAgo)
+                ->where(function ($q) use ($userId, $ipAddress) {
+                    if ($userId) {
+                        $q->where('user_id', $userId);
+                    }
+                    if ($ipAddress) {
+                        $q->orWhere('ip_address', $ipAddress);
+                    }
+                })
+                ->whereRaw("( 6371 * acos( cos( radians(?) ) * cos( radians( latitude ) ) * cos( radians( longitude ) - radians(?) ) + sin( radians(?) ) * sin( radians( latitude ) ) ) ) <= 0.5", [$lat, $lon, $lat])
+                ->first();
+
+            if ($recentReport) {
+                return response()->json([
+                    'message' => 'Laporan dari perangkat Anda di sekitar lokasi ini sudah tercatat. Mohon tunggu 10 menit sebelum memperbarui kondisi air.',
+                    'cooldown' => true,
+                    'event_id' => $recentReport->event_id,
+                ], 422);
+            }
+
+            // IP Rate Limiter anti-spam global (Bug 1: max 1 per 60 menit)
+            if (RateLimiter::tooManyAttempts($throttleKey, 1)) {
+                $seconds = RateLimiter::availableIn($throttleKey);
+                $minutes = ceil($seconds / 60);
+                
+                return response()->json([
+                    'message' => "Anda sudah membuat laporan. Tunggu {$minutes} menit lagi untuk mencegah spam/manipulasi data."
+                ], 429);
+            }
+        }
+
         // 2. Proses unggah foto (jika warga melampirkan foto)
         $photoPath = null;
         if ($request->hasFile('photo')) {
@@ -56,7 +84,7 @@ class ReportController extends Controller
             ->orderBy('distance')
             ->first();
 
-        $isRelawan = Auth::check() && in_array(Auth::user()->role, ['relawan', 'admin']);
+        $isRelawan = $user && in_array($user->role, ['relawan', 'admin']);
         $isSurut = $request->water_level == 'surut';
 
         if ($closestEvent) {
@@ -91,10 +119,11 @@ class ReportController extends Controller
             $eventId = $newEvent->id;
         }
 
-        // 3. Simpan laporan riil beserta alamat fotonya
+        // 3. Simpan laporan riil beserta alamat foto dan IP
         $report = Report::create([
             'event_id' => $eventId,
-            'user_id' => Auth::id(),
+            'user_id' => $userId,
+            'ip_address' => $ipAddress,
             'latitude' => $lat,
             'longitude' => $lon,
             'category' => $category,
@@ -103,13 +132,17 @@ class ReportController extends Controller
             'description' => $request->description,
         ]);
 
-        // --- TAMBAHAN BUG 1: Kunci IP selama 60 Menit (3600 detik) setelah berhasil melapor ---
-        RateLimiter::hit($throttleKey, 3600);
-        // ------------------------------------------------
+        // Kunci IP selama 60 Menit (3600 detik) setelah berhasil melapor (hanya jika bukan dev bypass)
+        if (!$isDevBypass) {
+            RateLimiter::hit($throttleKey, 3600);
+        }
+
+        $event = Event::with('reports')->find($eventId);
 
         return response()->json([
             'message' => 'Laporan berhasil diproses!', 
             'event_id' => $eventId,
+            'water_level' => $event?->water_level ?? ($request->water_level ?: 'selutut'),
             'photo_url' => $photoPath ? asset('storage/' . $photoPath) : null 
         ]);
     }

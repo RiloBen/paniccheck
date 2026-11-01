@@ -155,7 +155,7 @@
             <!-- M6: Action Buttons (Konfirmasi Warga & Penutupan Relawan) -->
             <div class="pt-2 border-t border-slate-800 space-y-2">
                 <template x-if="selectedEvent.status !== 'RESOLVED'">
-                    <div class="grid grid-cols-2 gap-2">
+                    <div class="grid gap-2" :class="(userRole === 'relawan' || userRole === 'admin') ? 'grid-cols-2' : 'grid-cols-1'">
                         <!-- Tombol Konfirmasi Silang Warga (Maksimal 1 Suara per Sesi & Validasi Jarak <= 500m PRD M6) -->
                         <template x-if="!hasConfirmed(selectedEvent.id)">
                             <div>
@@ -198,13 +198,15 @@
                             </button>
                         </template>
 
-                        <!-- Tombol Penutupan Relawan / Admin (Terproteksi Role) -->
-                        <button @click="resolveFlood(selectedEvent.id)"
-                                :disabled="isResolving"
-                                class="bg-emerald-600/90 hover:bg-emerald-500 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-lg shadow-emerald-600/20 active:scale-95 transition disabled:opacity-50">
-                            <span>🛡️</span>
-                            <span>Tandai Surut</span>
-                        </button>
+                        <!-- Tombol Penutupan Relawan / Admin (Khusus Relawan & Admin: Disembunyikan total dari Warga dan Guest) -->
+                        <template x-if="userRole === 'relawan' || userRole === 'admin'">
+                            <button @click="resolveFlood(selectedEvent.id)"
+                                    :disabled="isResolving"
+                                    class="bg-emerald-600/90 hover:bg-emerald-500 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-lg shadow-emerald-600/20 active:scale-95 transition disabled:opacity-50">
+                                <span>🛡️</span>
+                                <span>Konfirmasi Surut / Update Status</span>
+                            </button>
+                        </template>
                     </div>
                 </template>
 
