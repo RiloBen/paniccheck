@@ -4,7 +4,7 @@ nixPkgs = ["php83", "php83Packages.composer", "nodejs_20"]
 [phases.install]
 cmds = [
     "composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader",
-    "npm ci"
+    "npm install"
 ]
 
 [phases.build]
@@ -13,5 +13,4 @@ cmds = [
 ]
 
 [start]
-cmd = "php artisan storage:link || true; php artisan migrate --force; php artisan db:seed --force; php artisan serve --host=0.0.0.0 --port=$PORT"
-
+cmd = "php artisan storage:link || true; touch database/database.sqlite && chmod 777 database/database.sqlite; php artisan migrate --force; php artisan db:seed --force; php artisan serve --host=0.0.0.0 --port=$PORT"
