@@ -50,22 +50,43 @@ class ReportController extends Controller
         $twoHoursAgo = Carbon::now()->subHours(2);
         
         $closestEvent = Event::where('category', $category)
-            ->where('status', 'ACTIVE')
-            ->where('updated_at', '>=', $twoHoursAgo)
+            ->where('status', 'ACTIVE') // Cari yang masih aktif (termasuk yang stale/abu-abu), abaikan yang sudah RESOLVED
             ->whereRaw("( 6371 * acos( cos( radians(?) ) * cos( radians( latitude ) ) * cos( radians( longitude ) - radians(?) ) + sin( radians(?) ) * sin( radians( latitude ) ) ) ) <= 0.5", [$lat, $lon, $lat])
             ->selectRaw("*, ( 6371 * acos( cos( radians(?) ) * cos( radians( latitude ) ) * cos( radians( longitude ) - radians(?) ) + sin( radians(?) ) * sin( radians( latitude ) ) ) ) AS distance", [$lat, $lon, $lat])
             ->orderBy('distance')
             ->first();
 
+        $isRelawan = Auth::check() && in_array(Auth::user()->role, ['relawan', 'admin']);
+        $isSurut = $request->water_level == 'surut';
+
         if ($closestEvent) {
             $eventId = $closestEvent->id;
-            $closestEvent->touch(); 
+            
+            // JIKA LAPORAN BARU MENYATAKAN "SURUT" TAPI YANG MELAPOR BUKAN RELAWAN
+            if ($isSurut && !$isRelawan) {
+                // Kita hanya menyegarkan waktunya agar titik kuning menyala,
+                // tapi JANGAN ubah status utama menjadi RESOLVED untuk menghindari manipulasi orang iseng.
+                $closestEvent->update([
+                    'updated_at' => Carbon::now() 
+                ]);
+            } 
+            // JIKA LAPORANNYA GENANGAN AIR NORMAL ATAU YANG MELAPOR ADALAH RELAWAN
+            else {
+                // Update tinggi air sesuai laporan terbaru dan segarkan waktunya
+                $closestEvent->update([
+                    'water_level' => $request->water_level,
+                    'status' => $isSurut ? 'RESOLVED' : 'ACTIVE',
+                    'updated_at' => Carbon::now()
+                ]);
+            }
         } else {
+            // Jika benar-benar tidak ada titik di peta (baik kuning maupun abu-abu)
             $newEvent = Event::create([
                 'category' => $category,
                 'latitude' => $lat,
                 'longitude' => $lon,
-                'status' => 'ACTIVE'
+                'status' => 'ACTIVE',
+                'water_level' => $request->water_level // Simpan tinggi air awal
             ]);
             $eventId = $newEvent->id;
         }

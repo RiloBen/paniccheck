@@ -57,4 +57,38 @@ class AuthController extends Controller
             'access_token' => $token
         ]);
     }
+
+    // Fitur keluar dari akun (Logout)
+    public function logout(Request $request)
+    {
+        // Menghancurkan token yang sedang dipakai pada perangkat saat ini
+        $request->user()->currentAccessToken()->delete();
+
+        return response()->json([
+            'message' => 'Berhasil logout, akses token telah dihancurkan.'
+        ]);
+    }
+
+    // Fitur Warga mendaftar/naik pangkat menjadi Relawan
+    public function upgradeToRelawan(Request $request)
+    {
+        $user = $request->user(); // Ambil data user yang sedang login
+
+        // Cek jika dia sudah jadi relawan atau admin, tolak permintaannya
+        if ($user->role === 'relawan' || $user->role === 'admin') {
+            return response()->json([
+                'message' => 'Akun Anda sudah memiliki akses khusus.'
+            ], 400);
+        }
+
+        // Ubah pangkatnya di database
+        $user->update([
+            'role' => 'relawan'
+        ]);
+
+        return response()->json([
+            'message' => 'Selamat! Akun Anda telah ditingkatkan menjadi Relawan.',
+            'user' => $user
+        ]);
+    }
 }
