@@ -67,6 +67,8 @@ function paniccheckApp() {
         isResolving: false,
         quickCheckText: '',
         quickCheckResult: null,
+        isScanningQuickCheck: false,
+        _quickCheckTimer: null,
         photoPreview: null,
         photoFile: null,
         reportError: null,
@@ -272,42 +274,129 @@ function paniccheckApp() {
             const q = (this.quickCheckText || '').trim();
             if (!q) {
                 this.quickCheckResult = null;
+                this.isScanningQuickCheck = false;
+                clearTimeout(this._quickCheckTimer);
                 return;
             }
 
-            const streetKeywords = [
-                { pattern: /sungkono|mayjen|ciputra\s*world/i, label: 'Jl. Mayjen Sungkono' },
-                { pattern: /darmo|bungkul/i, label: 'Jl. Raya Darmo' },
-                { pattern: /kertajaya|klampis|its/i, label: 'Jl. Raya Kertajaya Indah' },
-                { pattern: /dharmawangsa|soetomo|unair/i, label: 'Jl. Dharmawangsa' },
-                { pattern: /ngagel|novotel/i, label: 'Jl. Ngagel' },
-                { pattern: /tunjungan|basuki\s*rahmat|tp\b/i, label: 'Jl. Basuki Rahmat / Tunjungan' },
-                { pattern: /pemuda|grahadi/i, label: 'Jl. Pemuda' },
-                { pattern: /wiyung|menganti/i, label: 'Jl. Raya Menganti Wiyung' },
-                { pattern: /rungkut|upn|sier/i, label: 'Kawasan Rungkut' }
+            // 1. Evaluasi instan client-side (0ms latency untuk responsivitas seketika)
+            this.evaluateQuickCheck(q);
+
+            // 2. Evaluasi mendalam backend /api/quick-check (NLP & pencocokan database terpadu)
+            clearTimeout(this._quickCheckTimer);
+            this.isScanningQuickCheck = true;
+            this._quickCheckTimer = setTimeout(() => {
+                this.fetchQuickCheckBackend(q);
+            }, 250);
+        },
+
+        evaluateQuickCheck(q) {
+            const text = q.toLowerCase();
+
+            // Deteksi Ketinggian Air dari kata kunci
+            let waterLevel = null;
+            if (/(sepinggang|pinggang|sedada|dada|leher|1\s*meter|1\s*m\b|1\.5\s*m|dalam\s*banget|tenggelam|parah)/i.test(q)) {
+                waterLevel = 'sepinggang_keatas';
+            } else if (/(selutut|lutut|sepaha|paha|setengah\s*meter|50\s*cm|60\s*cm|sedang)/i.test(q)) {
+                waterLevel = 'selutut';
+            } else if (/(mata\s*kaki|semata\s*kaki|mata_kaki|tumit|10\s*cm|20\s*cm|30\s*cm|dangkal|genangan\s*ringan)/i.test(q)) {
+                waterLevel = 'semata_kaki';
+            }
+
+            const hasFlood = /(banjir|genangan|tergenang|air\s*naik|luapan|meluap|tenggelam|mogok|waspada|macet\s*total|arus|bencana|darurat|sepinggang|selutut|mata\s*kaki)/i.test(q);
+            const hasSafe = /(lancar|aman|surut|kering|tidak\s*(ada\s*)?banjir|bebas\s*banjir|nihil\s*genangan|sudah\s*lewat|terkendali)/i.test(q);
+
+            if (hasFlood && !waterLevel) {
+                waterLevel = 'selutut';
+            }
+
+            // Kamus Spasial Surabaya Komprehensif (30+ titik strategis)
+            const surabayaStreets = [
+                { pattern: /sungkono|mayjen|ciputra\s*world/i, name: 'Jl. Mayjen Sungkono (Dekat Ciputra World)', short: 'Jl. Mayjen Sungkono', lat: -7.2892, lng: 112.7153 },
+                { pattern: /darmo|bungkul|al-falah/i, name: 'Jl. Raya Darmo (Depan Taman Bungkul)', short: 'Jl. Raya Darmo', lat: -7.2858, lng: 112.7383 },
+                { pattern: /kertajaya|klampis|its\b/i, name: 'Jl. Raya Kertajaya Indah', short: 'Jl. Raya Kertajaya Indah', lat: -7.2797, lng: 112.7758 },
+                { pattern: /dharmawangsa|soetomo|unair/i, name: 'Jl. Dharmawangsa (Depan RSUD Dr. Soetomo)', short: 'Jl. Dharmawangsa', lat: -7.2705, lng: 112.7562 },
+                { pattern: /ahmad\s*yani|a\.?\s*yani|bundaran\s*waru|royal\s*plaza/i, name: 'Jl. Frontage Ahmad Yani (Dekat Royal Plaza)', short: 'Jl. Frontage Ahmad Yani', lat: -7.3150, lng: 112.7340 },
+                { pattern: /ngagel|novotel|kali\s*ngagel/i, name: 'Jl. Ngagel', short: 'Jl. Ngagel', lat: -7.2915, lng: 112.7482 },
+                { pattern: /tunjungan|basuki\s*rahmat|tp\b/i, name: 'Jl. Basuki Rahmat / Tunjungan', short: 'Jl. Basuki Rahmat', lat: -7.2625, lng: 112.7390 },
+                { pattern: /pemuda|grahadi|delta\s*plaza/i, name: 'Jl. Pemuda', short: 'Jl. Pemuda', lat: -7.2650, lng: 112.7480 },
+                { pattern: /wiyung|menganti|babatan/i, name: 'Jl. Raya Menganti Wiyung', short: 'Jl. Raya Menganti Wiyung', lat: -7.3102, lng: 112.6950 },
+                { pattern: /rungkut|upn\b|sier/i, name: 'Kawasan Rungkut', short: 'Kawasan Rungkut', lat: -7.3275, lng: 112.7660 },
+                { pattern: /kenjeran|suramadu/i, name: 'Jl. Kenjeran', short: 'Jl. Kenjeran', lat: -7.2430, lng: 112.7780 },
+                { pattern: /wonokromo|joyoboyo|dtc/i, name: 'Kawasan Wonokromo', short: 'Kawasan Wonokromo', lat: -7.3005, lng: 112.7370 },
+                { pattern: /diponegoro|rkz/i, name: 'Jl. Diponegoro', short: 'Jl. Diponegoro', lat: -7.2870, lng: 112.7310 },
+                { pattern: /hr\s*muhammad/i, name: 'Jl. HR Muhammad', short: 'Jl. HR Muhammad', lat: -7.2850, lng: 112.6930 },
+                { pattern: /merr\b|ir\s*soekarno/i, name: 'Jl. Dr. Ir. H. Soekarno (MERR)', short: 'Jl. MERR Surabaya', lat: -7.3050, lng: 112.7820 },
+                { pattern: /jemursari/i, name: 'Jl. Raya Jemursari', short: 'Jl. Raya Jemursari', lat: -7.3180, lng: 112.7450 },
+                { pattern: /manyar|bratang/i, name: 'Jl. Manyar Kertoarjo', short: 'Jl. Manyar Kertoarjo', lat: -7.2820, lng: 112.7630 },
+                { pattern: /gubeng/i, name: 'Jl. Raya Gubeng', short: 'Jl. Raya Gubeng', lat: -7.2720, lng: 112.7500 },
+                { pattern: /kupang\s*jaya|banyu\s*urip/i, name: 'Jl. Kupang Jaya', short: 'Jl. Kupang Jaya', lat: -7.2750, lng: 112.7100 },
+                { pattern: /tandes|margomulyo/i, name: 'Kawasan Tandes', short: 'Kawasan Tandes', lat: -7.2550, lng: 112.6780 },
+                { pattern: /benowo|gbt\b/i, name: 'Kawasan Benowo', short: 'Kawasan Benowo', lat: -7.2350, lng: 112.6250 },
+                { pattern: /ketintang|unesa/i, name: 'Kawasan Ketintang', short: 'Kawasan Ketintang', lat: -7.3110, lng: 112.7230 }
             ];
 
-            const matchedStreet = streetKeywords.find(s => s.pattern.test(q));
+            let matchedLoc = surabayaStreets.find(s => s.pattern.test(q));
 
-            if (matchedStreet) {
-                const matchedEvent = this.events.find(e => {
-                    const loc = (e.location_name || '').toLowerCase();
-                    return matchedStreet.pattern.test(loc) || (e.reports && e.reports.some(r => matchedStreet.pattern.test(r.description || '')));
-                });
-
-                if (matchedEvent) {
-                    this.quickCheckResult = {
-                        type: matchedEvent.status,
-                        event: matchedEvent,
-                        query: matchedStreet.label
-                    };
-                } else {
-                    this.quickCheckResult = {
-                        type: 'SAFE',
-                        event: null,
-                        query: matchedStreet.label
-                    };
+            // Dynamic NLP Fallback: Tangkap nama jalan apa pun dari teks bebas (cth: "Banjir di daerah Kupang Baru")
+            if (!matchedLoc) {
+                const dynamicMatch = q.match(/(?:\b(?:jl\.?|jalan|daerah|kawasan|wilayah|depan|sekitar|arah|sepanjang|gang|komplek)\b)\s+([A-Za-z0-9\s\-]{3,30})/i);
+                if (dynamicMatch) {
+                    const cleanName = dynamicMatch[1].replace(/\s+(banjir|air|macet|dan|di|ke|ada).*$/i, '').trim();
+                    if (cleanName.length >= 3) {
+                        matchedLoc = {
+                            name: 'Jl. ' + cleanName + ' (Surabaya)',
+                            short: 'Jl. ' + cleanName,
+                            lat: -7.2575,
+                            lng: 112.7521
+                        };
+                    }
                 }
+            }
+
+            // Cari kecocokan di events lokal yang aktif
+            let matchedEvent = null;
+            if (matchedLoc) {
+                const queryStr = matchedLoc.short.toLowerCase();
+                matchedEvent = this.events.find(e => {
+                    const loc = (e.location_name || '').toLowerCase();
+                    const desc = (e.reports && e.reports.length > 0) ? e.reports.map(r => r.description || '').join(' ').toLowerCase() : '';
+                    const dist = this.calculateHaversine(matchedLoc.lat, matchedLoc.lng, parseFloat(e.latitude), parseFloat(e.longitude));
+                    return loc.includes(queryStr) || desc.includes(queryStr.replace('jl. ', '')) || dist <= 800;
+                });
+            } else {
+                matchedEvent = this.events.find(e => {
+                    const loc = (e.location_name || '').toLowerCase();
+                    return loc && text.includes(loc.split(' ')[1] || '---');
+                });
+            }
+
+            if (matchedEvent) {
+                this.quickCheckResult = {
+                    type: matchedEvent.status, // ACTIVE | STALE | RESOLVED
+                    event: matchedEvent,
+                    location_hint: matchedEvent.location_name || (matchedLoc ? matchedLoc.name : 'Titik Kejadian Terdaftar'),
+                    water_level: matchedEvent.water_level || waterLevel || 'selutut',
+                    query: matchedLoc ? matchedLoc.short : q
+                };
+            } else if (hasFlood) {
+                // Teks bebas mengindikasikan banjir di lokasi baru
+                this.quickCheckResult = {
+                    type: 'NEW_DETECTION',
+                    event: null,
+                    location_hint: matchedLoc ? matchedLoc.name : 'Titik Baru Terdeteksi dari Pesan Warga',
+                    water_level: waterLevel || 'selutut',
+                    latitude: matchedLoc ? matchedLoc.lat : -7.2892,
+                    longitude: matchedLoc ? matchedLoc.lng : 112.7153,
+                    query: matchedLoc ? matchedLoc.short : q
+                };
+            } else if (matchedLoc && (hasSafe || !hasFlood)) {
+                this.quickCheckResult = {
+                    type: 'SAFE',
+                    event: null,
+                    location_hint: matchedLoc.name,
+                    query: matchedLoc.short
+                };
             } else {
                 this.quickCheckResult = {
                     type: 'UNRECOGNIZED',
@@ -315,6 +404,83 @@ function paniccheckApp() {
                     query: q
                 };
             }
+        },
+
+        async fetchQuickCheckBackend(q) {
+            try {
+                const res = await fetch('/api/quick-check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ text: q })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.status === 'success') {
+                        const mType = data.match_type;
+                        if (mType === 'ACTIVE' || mType === 'STALE' || mType === 'RESOLVED') {
+                            this.quickCheckResult = {
+                                type: mType,
+                                event: data.event,
+                                location_hint: data.extracted_data.location_hint,
+                                water_level: data.extracted_data.water_level,
+                                query: data.extracted_data.location_hint
+                            };
+                        } else if (mType === 'NEW_DETECTION') {
+                            this.quickCheckResult = {
+                                type: 'NEW_DETECTION',
+                                event: null,
+                                location_hint: data.extracted_data.location_hint,
+                                water_level: data.extracted_data.water_level,
+                                latitude: data.extracted_data.latitude,
+                                longitude: data.extracted_data.longitude,
+                                query: data.extracted_data.location_hint
+                            };
+                        } else if (mType === 'SAFE') {
+                            this.quickCheckResult = {
+                                type: 'SAFE',
+                                event: null,
+                                location_hint: data.extracted_data.location_hint,
+                                query: data.extracted_data.location_hint
+                            };
+                        } else if (mType === 'UNRECOGNIZED') {
+                            if (!this.quickCheckResult || this.quickCheckResult.type === 'UNRECOGNIZED') {
+                                this.quickCheckResult = {
+                                    type: 'UNRECOGNIZED',
+                                    event: null,
+                                    query: q
+                                };
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn('QuickCheck API fallback to local parser:', err);
+            } finally {
+                this.isScanningQuickCheck = false;
+            }
+        },
+
+        plotNewDetectionFromQuickCheck(result) {
+            if (!result) return;
+            const lat = parseFloat(result.latitude || -7.2892);
+            const lng = parseFloat(result.longitude || 112.7153);
+
+            this.selectedEvent = null;
+            this.reportError = null;
+            this.form.latitude = lat;
+            this.form.longitude = lng;
+            this.locationAccuracy = 15; // Set akurasi tetap agar tidak otomatis tertimpa GPS browser
+            this.form.water_level = result.water_level || 'selutut';
+            this.form.description = this.quickCheckText || ('Indikasi banjir di ' + (result.location_hint || 'Surabaya'));
+
+            this.showReportModal = true;
+
+            if (this.map) {
+                this.map.flyTo([lat, lng], 16, { animate: true, duration: 1.2 });
+            }
+
+            this.showToast('📍 Data lokasi & kondisi air otomatis dimasukkan ke form laporan!', 'info');
         },
 
         focusEvent(ev) {

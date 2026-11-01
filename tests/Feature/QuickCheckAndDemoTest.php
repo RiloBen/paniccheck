@@ -148,5 +148,91 @@ class QuickCheckAndDemoTest extends TestCase
                 ],
             ]);
     }
+
+    /**
+     * Uji M10: Quick Check Scanner mendeteksi indikasi banjir baru dari broadcast teks WA bebas (tanpa data di database).
+     */
+    public function test_quick_check_scanner_detects_new_flood_indication_from_arbitrary_whatsapp_broadcast(): void
+    {
+        // Pastikan tidak ada event di DB
+        $this->assertEquals(0, Event::count());
+
+        $response = $this->postJson('/api/quick-check', [
+            'text' => 'Waspada lur, Jl. Ahmad Yani depan Royal Plaza banjir selutut macet parah mobil gak bisa lewat!',
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'status' => 'success',
+                'match_type' => 'NEW_DETECTION',
+                'extracted_data' => [
+                    'is_new_indication' => true,
+                    'water_level' => 'selutut',
+                    'category' => 'Banjir',
+                ],
+            ]);
+
+        $json = $response->json();
+        $this->assertStringContainsString('Ahmad Yani', $json['extracted_data']['location_hint']);
+        $this->assertNotNull($json['extracted_data']['latitude']);
+        $this->assertNotNull($json['extracted_data']['longitude']);
+    }
+
+    /**
+     * Uji M10: Quick Check Scanner mendeteksi nama jalan dengan dynamic NLP regex dari teks sembarang.
+     */
+    public function test_quick_check_scanner_extracts_dynamic_location_from_unlisted_street(): void
+    {
+        $response = $this->postJson('/api/quick-check', [
+            'text' => 'Tolong min, banjir parah sepinggang di Jalan Simo Pomahan gang 5 air masuk rumah!',
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'status' => 'success',
+                'match_type' => 'NEW_DETECTION',
+                'extracted_data' => [
+                    'water_level' => 'sepinggang_keatas',
+                ],
+            ]);
+
+        $json = $response->json();
+        $this->assertStringContainsString('Simo Pomahan', $json['extracted_data']['location_hint']);
+    }
+
+    /**
+     * Uji M10: Quick Check Scanner mendeteksi jalur aman terpantau.
+     */
+    public function test_quick_check_scanner_detects_safe_road_condition(): void
+    {
+        $response = $this->postJson('/api/quick-check', [
+            'text' => 'Laporan sore: Jalan Pemuda aman lancar tidak ada banjir sama sekali.',
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'status' => 'success',
+                'match_type' => 'SAFE',
+            ]);
+
+        $json = $response->json();
+        $this->assertStringContainsString('Pemuda', $json['extracted_data']['location_hint']);
+    }
+
+    /**
+     * Uji M10: Quick Check Scanner menangani teks umum tanpa nama jalan dan tanpa banjir.
+     */
+    public function test_quick_check_scanner_handles_generic_unrecognized_text(): void
+    {
+        $response = $this->postJson('/api/quick-check', [
+            'text' => 'Halo mas bro besok pagi ada agenda kumpul tim gak ya?',
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'status' => 'success',
+                'match_type' => 'UNRECOGNIZED',
+            ]);
+    }
 }
 

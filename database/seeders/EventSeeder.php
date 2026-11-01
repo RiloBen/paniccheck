@@ -14,6 +14,7 @@ class EventSeeder extends Seeder
         // 1. Event ACTIVE: Mayjen Sungkono (Air tinggi, baru diperbarui)
         $event1 = Event::create([
             'category' => 'Banjir',
+            'location_name' => 'Jl. Mayjen Sungkono (Dekat Ciputra World)',
             'latitude' => -7.28920000,
             'longitude' => 112.71530000,
             'status' => 'ACTIVE',
@@ -45,6 +46,7 @@ class EventSeeder extends Seeder
         // 2. Event STALE: Raya Darmo (Tidak ada update > 2 jam)
         $event2 = Event::create([
             'category' => 'Banjir',
+            'location_name' => 'Jl. Raya Darmo (Depan Taman Bungkul)',
             'latitude' => -7.28580000,
             'longitude' => 112.73830000,
             'status' => 'STALE',
@@ -65,6 +67,7 @@ class EventSeeder extends Seeder
         // 3. Event ACTIVE: Kertajaya Indah (Air sedang)
         $event3 = Event::create([
             'category' => 'Banjir',
+            'location_name' => 'Jl. Raya Kertajaya Indah',
             'latitude' => -7.27970000,
             'longitude' => 112.77580000,
             'status' => 'ACTIVE',
@@ -85,6 +88,7 @@ class EventSeeder extends Seeder
         // 4. Event RESOLVED: Dharmawangsa (Sudah surut)
         $event4 = Event::create([
             'category' => 'Banjir',
+            'location_name' => 'Jl. Dharmawangsa (Depan RSUD Dr. Soetomo)',
             'latitude' => -7.27050000,
             'longitude' => 112.75620000,
             'status' => 'RESOLVED',
